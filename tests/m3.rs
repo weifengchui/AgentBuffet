@@ -194,7 +194,11 @@ fn group(members: &[(u32, &str, &str)]) -> String {
 
 fn gw_config(providers: &[String], members: &[(u32, &str, &str)], prices: Option<&Path>) -> String {
     let pr = match prices {
-        Some(p) => format!("prices:\n  file: \"{}\"\n", p.display()),
+        Some(p) => {
+            // Windows 路径含反斜杠，YAML 双引号标量会按转义解析（\U 等），先转义。
+            let esc = p.display().to_string().replace('\\', "\\\\");
+            format!("prices:\n  file: \"{esc}\"\n")
+        }
         None => String::new(),
     };
     format!(
