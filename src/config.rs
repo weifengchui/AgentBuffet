@@ -325,7 +325,9 @@ pub fn load_str(text: &str, filename: &str) -> Result<Snapshot, Vec<String>> {
                     g.name, m.provider
                 )),
                 Some(p) => {
-                    if !p.models.contains(&m.model) {
+                    // models 为空 = 不限制模型（如 OpenRouter 这类目录庞大的服务商），
+                    // 允许成员引用任意 model，由 UI 自由输入。
+                    if !p.models.is_empty() && !p.models.contains(&m.model) {
                         errs.push(format!(
                             "{filename}: 路由组 {} 成员 {}/{} 的 model 不在该 provider 声明列表中",
                             g.name, m.provider, m.model

@@ -131,6 +131,46 @@ async fn group_upsert_and_delete() {
 }
 
 #[tokio::test]
+async fn group_member_any_model_when_provider_models_empty() {
+    // OpenRouter 类服务商 models 为空 = 不限制模型；成员可用任意 model。
+    let (st, dir) = state_for("em");
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "/_admin/provider/edit",
+        serde_json::json!({"id": "p1", "models": []}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    let body = serde_json::json!({"name": "g3", "members": [
+        {"provider": "p1", "model": "x-ai/grok-4", "priority": 1}]});
+    let (code, j) = call(st.clone(), LB, "/_admin/group", body).await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    assert!(read(&dir).contains("x-ai/grok-4"));
+    // models 非空时仍强制成员 model 必须在声明列表内：先删 g3 再恢复声明
+    let (code, _) = call(
+        st.clone(),
+        LB,
+        "/_admin/group/delete",
+        serde_json::json!({"name": "g3"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "/_admin/provider/edit",
+        serde_json::json!({"id": "p1", "models": ["m-a"]}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    let body = serde_json::json!({"name": "g4", "members": [
+        {"provider": "p1", "model": "not-declared", "priority": 1}]});
+    let (code, _) = call(st, LB, "/_admin/group", body).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn provider_edit_and_cascade_delete() {
     let (st, dir) = state_for("pv");
     let (code, _) = call(

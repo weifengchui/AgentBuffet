@@ -162,6 +162,8 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow select, .mrow input { width: auto; }
 .mrow .mp { flex: 1 1 34%; } .mrow .mm { flex: 1 1 40%; }
 .mrow .btn.ghost { flex: 0 0 auto; }
+.mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
+.mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
 @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } aside { width: 62px; }
   body:not(.sb-collapsed) aside { width: 216px; } }
@@ -717,8 +719,9 @@ function renderMembers() {
     const ms = (p && p.models) || [];
     const modelCell = ms.length
       ? `<select class="mm" data-i="${i}" data-f="model">${ms.map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>`
-      : `<input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}">`;
-    return `<div class="mrow"><span class="chip">#${i + 1}</span>
+      : `<input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
+    return `<div class="mrow" data-i="${i}"><span class="grip" draggable="true" title="${esc(L("拖动排序", "Drag to reorder"))}">⠿</span>
+      <span class="chip">#${i + 1}</span>
       <select class="mp" data-i="${i}" data-f="provider">${providerOpts(r.provider)}</select>
       ${modelCell}
       <button class="btn sm ghost" data-act="up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
@@ -727,6 +730,22 @@ function renderMembers() {
   }).join("");
   $("gm-list").querySelectorAll("select,input").forEach(el => {
     el.onchange = () => { gm[+el.dataset.i][el.dataset.f] = el.value; };
+    if (el.tagName === "INPUT") el.oninput = el.onchange;
+  });
+  let dragI = null;
+  $("gm-list").querySelectorAll(".grip").forEach(el => {
+    el.ondragstart = (e) => { dragI = +el.closest(".mrow").dataset.i; e.dataTransfer.effectAllowed = "move"; };
+    el.ondragend = () => { dragI = null; };
+  });
+  $("gm-list").querySelectorAll(".mrow").forEach(row => {
+    row.ondragover = (e) => { if (dragI == null) return; e.preventDefault(); row.classList.add("dragover"); };
+    row.ondragleave = () => row.classList.remove("dragover");
+    row.ondrop = (e) => {
+      e.preventDefault(); row.classList.remove("dragover");
+      const from = dragI, to = +row.dataset.i;
+      if (from != null && from !== to) { const [m] = gm.splice(from, 1); gm.splice(to, 0, m); }
+      dragI = null; renderMembers();
+    };
   });
   $("gm-list").querySelectorAll("button").forEach(b => {
     b.onclick = () => {
