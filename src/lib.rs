@@ -441,6 +441,26 @@ async fn autostart_set(
 
 /// 热重载核心（§5）：校验失败 422（带文件名），旧快照继续服务；
 /// 成功则 swap 快照、复位 degraded/熔断（保留额度计数）、重读单价表（counters 保留）。
+/// 自动修复已接入但配置漂移的 Agent（仅会写文件的适配器），返回被修复的 agent id。
+pub async fn repair_drifted(st: &proxy::AppState) -> Vec<String> {
+    let snap = st.snap.read().await.clone();
+    let mut refreshed = Vec::new();
+    for t in agent_targets(&snap) {
+        let a = onboard::Adapter::resolve(&t.agent_id, &t.adapter);
+        if !matches!(
+            a,
+            onboard::Adapter::OpenCode | onboard::Adapter::Codex | onboard::Adapter::Hermes
+        ) {
+            continue;
+        }
+        let d = onboard::detect(&st.home, &t);
+        if d.attached && d.drifted && onboard::apply(&st.home, &t).is_ok() {
+            refreshed.push(t.agent_id.clone());
+        }
+    }
+    refreshed
+}
+
 async fn do_reload(st: &proxy::AppState) -> (StatusCode, serde_json::Value) {
     load_env_file(&st.env_file);
     let Some(path) = &st.config_path else {
@@ -476,20 +496,7 @@ async fn do_reload(st: &proxy::AppState) -> (StatusCode, serde_json::Value) {
     *st.snap.write().await = Arc::new(snap.clone());
     st.states.reset();
     // 热重载后自动重写已接入但漂移的 Agent 配置（如路由组增删模型后需重新枚举）
-    let mut refreshed: Vec<String> = Vec::new();
-    for t in agent_targets(&snap) {
-        let a = onboard::Adapter::for_agent(&t.agent_id);
-        if !matches!(
-            a,
-            onboard::Adapter::OpenCode | onboard::Adapter::Codex | onboard::Adapter::Hermes
-        ) {
-            continue;
-        }
-        let d = onboard::detect(&st.home, &t);
-        if d.attached && d.drifted && onboard::apply(&st.home, &t).is_ok() {
-            refreshed.push(t.agent_id.clone());
-        }
-    }
+    let refreshed = repair_drifted(st).await;
     let mut w = warnings;
     if let Some(u) = &st.usage {
         let (prices, warn) = usage::load_prices(&snap.raw.prices.file);

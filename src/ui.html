@@ -379,7 +379,7 @@ const I18N = {
     "pv.add": "添加服务商", "pv.hint": "API Key 仅存于本机 env 文件（0600），绝不写入配置",
     "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
     "rt.quickAdd": "＋ 成员", "rt.disable": "禁用", "rt.enable": "启用", "rt.del": "删除成员",
-    "ag.adapter": "适配器", "ag.adAuto": "自动（按 ID 推断）",
+    "ag.adapter": "适配器", "ag.adAuto": "自动（按 ID 推断）", "ag.repair": "一键修复",
     "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
     "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.models": "使用模型",
     "ag.detect": "本机 Agent 检测", "ag.detectHint": "自动识别本机已安装的编程 Agent，一键接入网关",
@@ -411,7 +411,7 @@ const I18N = {
     "pv.add": "Add provider", "pv.hint": "API keys live only in the local env file (0600), never in config",
     "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
     "rt.quickAdd": "＋ Member", "rt.disable": "Disable", "rt.enable": "Enable", "rt.del": "Remove member",
-    "ag.adapter": "Adapter", "ag.adAuto": "Auto (by ID)",
+    "ag.adapter": "Adapter", "ag.adAuto": "Auto (by ID)", "ag.repair": "Repair",
     "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
     "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.models": "Models",
     "ag.detect": "Detected local agents", "ag.detectHint": "Coding tools found on this machine, attach in one click",
@@ -935,6 +935,14 @@ function agentRefreshedNote(j) {
   const n = j && j.agents_refreshed ? j.agents_refreshed.length : 0;
   return n ? L(`，已自动刷新 ${n} 个接入器配置`, ` · ${n} agent config(s) refreshed`) : "";
 }
+async function doRepair(id) {
+  try {
+    const r = await post("/api/agents/attach", { agent_id: id });
+    toast(L("已修复 ", "Repaired ") + id + (r && r.note ? ` · ${r.note}` : ""), "ok");
+    loadAgents();
+  } catch (err) { toast(err.message, "bad"); }
+}
+
 function gridOps() {
   document.querySelectorAll("#rt-grid button[data-act]").forEach(b => { b.onclick = () => memberAct(b); });
 }
@@ -1137,7 +1145,7 @@ async function loadAgents() {
         <td><code>${esc(a.default_group || "-")}</code></td>
         <td>${modelsCell(a)}</td>
         <td style="white-space:nowrap">
-          ${a.attached ? `<button class="btn sm ghost" onclick="doDetach('${esc(a.agent_id)}')">${esc(L("还原", "Restore"))}</button>`
+          ${a.attached ? (a.drifted ? `<button class="btn sm primary" onclick="doRepair('${esc(a.agent_id)}')">${esc(t("ag.repair"))}</button>` : "") + `<button class="btn sm ghost" onclick="doDetach('${esc(a.agent_id)}')">${esc(L("还原", "Restore"))}</button>`
             : `<button class="btn sm primary" onclick="openAttach('${esc(a.agent_id)}')">${esc(L("接入", "Attach"))}</button>`}
           <button class="btn sm ghost" onclick="openAgent('${esc(a.agent_id)}')">${esc(L("编辑", "Edit"))}</button>
           <button class="btn sm danger" onclick="delAgent('${esc(a.agent_id)}')">${esc(L("删除", "Delete"))}</button>

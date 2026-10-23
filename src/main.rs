@@ -130,6 +130,21 @@ async fn serve() {
         });
     }
 
+    // 漂移巡检：手动改动 Agent 本地配置等场景下自动还原，无需人为操作
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            let mut iv = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                iv.tick().await;
+                let fixed = agentbuffet::repair_drifted(&st).await;
+                if !fixed.is_empty() {
+                    println!("已自动修复接入器配置漂移: {}", fixed.join(", "));
+                }
+            }
+        });
+    }
+
     let gateway_app = agentbuffet::build_router(state.clone());
     let admin_app = agentbuffet::build_admin_router(state.clone());
 
