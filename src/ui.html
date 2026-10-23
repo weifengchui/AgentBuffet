@@ -1011,7 +1011,7 @@ function quickAddMember(name) {
     if (!model) return toast(L("模型不能为空", "Model required"), "warn");
     const ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority, disabled: !!m.disabled }));
     if (ms.some(m => m.provider === $("qa-p").value && m.model === model)) return toast(L("该成员已存在", "Member already exists"), "warn");
-    ms.push({ provider: $("qa-p").value, model, priority: ms.length + 1 });
+    ms.push({ provider: $("qa-p").value, model, priority: Math.max(0, ...ms.map(m => m.priority || 0)) + 1 });
     try {
       const j = await post("/_admin/routing", { group: name, members: ms });
       closeModal(); toast(L("成员已添加并热重载", "Member added & hot-reloaded") + agentRefreshedNote(j), "ok");
