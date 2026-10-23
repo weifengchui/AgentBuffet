@@ -3,134 +3,304 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgentBuffet</title>
+<title>AgentBuffet Console</title>
 <style>
 :root {
-  --bg: #10141a; --panel: #171d26; --line: #263041; --text: #d7dee8;
-  --dim: #8a97a8; --accent: #4da3ff; --ok: #3fb96f; --warn: #e0a63c; --bad: #e05c5c;
+  --bg: #0b0e14; --side: #0e1219; --card: #10151d; --card2: #131a24;
+  --line: #1c2330; --text: #dbe2ea; --dim: #7d8aa0; --dim2: #9aa7b8;
+  --accent: #4f8cff; --accent2: #7fb0ff; --active: #16233b;
+  --on: #3fb950; --off: #f85149; --warn: #d29922;
+  --chip: #182238; --chip-t: #9db4dd;
 }
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.5 "SF Mono", "Cascadia Code", Consolas, "Noto Sans Mono CJK SC", monospace; }
-header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
-  border-bottom: 1px solid var(--line); background: var(--panel); }
-header h1 { font-size: 16px; margin: 0; color: var(--accent); }
-header .sub { color: var(--dim); font-size: 12px; }
-nav { display: flex; gap: 6px; margin-left: auto; }
-nav button { background: none; border: 1px solid var(--line); color: var(--dim);
-  padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
-nav button.on { color: var(--text); border-color: var(--accent); background: #1b2a3d; }
-main { padding: 18px 20px 40px; max-width: 1200px; margin: 0 auto; }
+  font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
+.app { display: flex; min-height: 100vh; }
+
+/* ---------------- sidebar ---------------- */
+aside { width: 216px; flex: 0 0 auto; background: var(--side); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; transition: width .18s; }
+.logo { display: flex; align-items: center; gap: 9px; padding: 18px 16px 14px; white-space: nowrap; overflow: hidden; }
+.logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 10px var(--accent); flex: 0 0 auto; }
+.logo .word { font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: .2px; }
+.logo .ver { font-size: 10px; color: var(--accent2); background: var(--chip); border: 1px solid #223052;
+  border-radius: 999px; padding: 1px 7px; }
+nav { display: flex; flex-direction: column; gap: 3px; padding: 6px 10px; flex: 1; }
+nav button { display: flex; align-items: center; gap: 10px; background: none; border: none;
+  color: var(--dim); padding: 9px 12px; border-radius: 8px; cursor: pointer; font: inherit;
+  text-align: left; white-space: nowrap; overflow: hidden; }
+nav button:hover { color: var(--text); background: #121826; }
+nav button.on { color: var(--accent2); background: var(--active); }
+nav button svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.side-foot { padding: 12px 10px; border-top: 1px solid var(--line); display: flex; gap: 6px; }
+.side-foot button { flex: 1; background: none; border: 1px solid var(--line); color: var(--dim);
+  padding: 6px 0; border-radius: 8px; cursor: pointer; font: inherit; }
+.side-foot button:hover { color: var(--text); border-color: #2a3548; }
+body.sb-collapsed aside { width: 62px; }
+body.sb-collapsed .logo .word, body.sb-collapsed .logo .ver,
+body.sb-collapsed nav button span, body.sb-collapsed nav button { justify-content: center; }
+body.sb-collapsed nav button { padding: 9px 0; }
+
+/* ---------------- topbar / main ---------------- */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+header.top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px;
+  padding: 12px 24px; background: rgba(11,14,20,.78); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); }
+header.top h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.pills { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+#content { padding: 22px 24px 60px; max-width: 1240px; width: 100%; margin: 0 auto; }
 .view { display: none; } .view.on { display: block; }
+
+/* ---------------- primitives ---------------- */
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 16px 18px; margin-bottom: 16px; }
+.panel > h3 { margin: 0 0 4px; font-size: 14px; color: var(--text); }
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-button.act { background: #1b2a3d; border: 1px solid var(--line); color: var(--accent);
-  padding: 5px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
-button.act:hover { border-color: var(--accent); }
-button.act.danger { color: var(--bad); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
-.card .k { color: var(--dim); font-size: 12px; }
-.card .v { font-size: 20px; margin-top: 4px; }
-table { width: 100%; border-collapse: collapse; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); font-size: 13px; }
-th { color: var(--dim); font-weight: normal; background: #131923; }
-tr:last-child td { border-bottom: none; }
-.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid; }
-.badge.ok { color: var(--ok); border-color: var(--ok); }
-.badge.warn { color: var(--warn); border-color: var(--warn); }
-.badge.bad { color: var(--bad); border-color: var(--bad); }
-.badge.dim { color: var(--dim); border-color: var(--line); }
-.bar { background: #0c1015; border-radius: 4px; height: 8px; width: 120px; overflow: hidden; }
-.bar i { display: block; height: 100%; background: var(--accent); }
-pre { background: #0c1015; border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px; overflow-x: auto; font-size: 12px; color: #b8c4d4; }
 .muted { color: var(--dim); font-size: 12px; }
-.group { margin-bottom: 18px; }
-.group h3 { margin: 0 0 8px; font-size: 14px; color: var(--accent); }
-.msg { margin-top: 10px; white-space: pre-wrap; }
-select, input[type=password], input[type=text] { background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
-input#qa-key { width: 280px; }
-select:disabled { opacity: .45; }
+.btn { background: var(--active); border: 1px solid #27406b; color: var(--accent2);
+  padding: 6px 13px; border-radius: 8px; cursor: pointer; font: inherit; white-space: nowrap; }
+.btn:hover { border-color: var(--accent); color: #a8c8ff; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+.btn.primary:hover { background: #6ba1ff; color: #06101f; }
+.btn.ghost { background: transparent; border-color: var(--line); color: var(--dim2); }
+.btn.ghost:hover { color: var(--text); border-color: #2a3548; }
+.btn.danger { background: #1a1215; border-color: #3a2026; color: var(--off); }
+.btn.danger:hover { border-color: var(--off); color: #ff8880; }
+.btn.sm { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
+.chip { display: inline-block; background: var(--chip); color: var(--chip-t); border-radius: 6px;
+  padding: 1px 8px; font-size: 12px; white-space: nowrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+  padding: 2px 10px; font-size: 12px; border: 1px solid; white-space: nowrap; }
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.pill.on { color: var(--on); border-color: #274a30; background: #101d14; }
+.pill.off { color: var(--off); border-color: #4a2726; background: #1d1010; }
+.pill.warn { color: var(--warn); border-color: #4a3d1e; background: #1d1810; }
+.pill.dim { color: var(--dim); border-color: var(--line); background: #10151d; }
+.bar { background: #0c1015; border-radius: 3px; height: 6px; overflow: hidden; flex: 1; min-width: 60px; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.bar i.hot { background: var(--warn); } .bar i.full { background: var(--off); }
+table { width: 100%; border-collapse: collapse; }
+th { color: var(--dim); font-weight: 500; font-size: 12px; text-align: left;
+  padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 10px; border-bottom: 1px solid #161d29; font-size: 13px; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--card2); }
+pre { background: #0c1015; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  overflow-x: auto; font: 12px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; color: #b8c4d4;
+  margin: 8px 0; }
+code { font: 12px ui-monospace, Consolas, monospace; color: var(--chip-t); }
+input[type=text], input[type=password], input[type=number], select, textarea {
+  background: #0d1320; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 10px; font: inherit; outline: none; width: 100%; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+  linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 55%, calc(100% - 9px) 55%;
+  background-size: 5px 5px; background-repeat: no-repeat; padding-right: 26px; }
+label.f { display: block; margin-bottom: 12px; }
+label.f > span { display: block; color: var(--dim2); font-size: 12px; margin-bottom: 4px; }
+label.ck { display: flex; align-items: center; gap: 8px; color: var(--dim2); cursor: pointer; margin-bottom: 10px; }
+label.ck input { width: auto; accent-color: var(--accent); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.empty { border: 1px dashed #2a3548; border-radius: 12px; padding: 42px 20px; text-align: center;
+  color: var(--dim); background: #0d1219; }
+.empty .big { font-size: 26px; margin-bottom: 8px; }
+.empty b { color: var(--dim2); font-weight: 500; display: block; margin-bottom: 4px; }
+
+/* ---------------- cards ---------------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.stat .k { color: var(--dim); font-size: 12px; }
+.stat .v { font-size: 22px; font-weight: 600; margin-top: 4px; color: var(--text); }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.pcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 9px; }
+.pcard:hover { border-color: #2a3548; }
+.pc-top { display: flex; align-items: center; gap: 8px; }
+.pc-id { font-size: 14px; font-weight: 600; color: var(--text); word-break: break-all; }
+.quota { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); }
+.pc-ops { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.gcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 14px; }
+.g-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.g-top b { font-size: 14px; }
+.g-ops { margin-left: auto; display: flex; gap: 6px; }
+
+/* ---------------- modal / toast ---------------- */
+#modal-mask { display: none; position: fixed; inset: 0; background: rgba(4,7,12,.62);
+  backdrop-filter: blur(3px); z-index: 100; align-items: flex-start; justify-content: center;
+  overflow-y: auto; padding: 7vh 16px 16px; }
+#modal-mask.on { display: flex; }
+#modal-box { background: var(--card); border: 1px solid #263041; border-radius: 14px;
+  width: 600px; max-width: 94vw; box-shadow: 0 18px 50px rgba(0,0,0,.55); animation: pop .16s ease-out; }
+@keyframes pop { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+#modal-head { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+#modal-head b { font-size: 14px; }
+#modal-x { margin-left: auto; background: none; border: none; color: var(--dim); font-size: 18px;
+  cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+#modal-x:hover { color: var(--text); background: var(--card2); }
+#modal-body { padding: 16px 18px; max-height: 66vh; overflow-y: auto; }
+#modal-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+#toasts { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex;
+  flex-direction: column; gap: 8px; max-width: 420px; }
+.toast { background: var(--card); border: 1px solid #263041; border-left-width: 3px; border-radius: 10px;
+  padding: 10px 14px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  animation: slidein .18s ease-out; word-break: break-all; }
+.toast.ok { border-left-color: var(--on); }
+.toast.bad { border-left-color: var(--off); }
+.toast.warn { border-left-color: var(--warn); }
+.toast.info { border-left-color: var(--accent); }
+@keyframes slidein { from { transform: translateX(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+details.adv { border: 1px solid var(--line); border-radius: 12px; background: var(--card); margin-bottom: 16px; }
+details.adv > summary { cursor: pointer; padding: 13px 18px; color: var(--dim2); font-weight: 500; }
+details.adv > summary:hover { color: var(--text); }
+details.adv .adv-body { padding: 0 18px 16px; }
+.mrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.mrow select, .mrow input { width: auto; }
+.mrow .mp { flex: 1 1 34%; } .mrow .mm { flex: 1 1 40%; }
+.mrow .btn.ghost { flex: 0 0 auto; }
+hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } aside { width: 62px; }
+  body:not(.sb-collapsed) aside { width: 216px; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>AgentBuffet</h1><span class="sub" data-i18n="sub"></span>
-  <nav>
-    <button data-v="overview" class="on" data-i18n="nav.overview"></button>
-    <button data-v="providers" data-i18n="nav.providers"></button>
-    <button data-v="routing" data-i18n="nav.routing"></button>
-    <button data-v="agents" data-i18n="nav.agents"></button>
-    <button data-v="config" data-i18n="nav.config"></button>
-    <button id="lang-btn" onclick="toggleLang()">中</button>
-  </nav>
-</header>
-<main>
-  <section id="v-overview" class="view on">
-    <div class="toolbar"><button class="act" onclick="loadOverview()" data-i18n="refresh"></button>
-      <span class="muted" id="ov-date"></span></div>
-    <div class="cards">
-      <div class="card"><div class="k" data-i18n="ov.req"></div><div class="v" id="ov-req">-</div></div>
-      <div class="card"><div class="k">Prompt tokens</div><div class="v" id="ov-pt">-</div></div>
-      <div class="card"><div class="k">Completion tokens</div><div class="v" id="ov-ct">-</div></div>
-      <div class="card"><div class="k" data-i18n="ov.cost"></div><div class="v" id="ov-cost">-</div></div>
+<div class="app">
+  <aside>
+    <div class="logo"><span class="dot"></span><span class="word">AgentBuffet</span><span class="ver">v__BUFFET_VERSION__</span></div>
+    <nav id="nav">
+      <button data-v="overview" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span data-i18n="nav.overview"></span></button>
+      <button data-v="providers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18a4 4 0 1 1 .6-7.96A6 6 0 0 1 18 9.5 4.2 4.2 0 0 1 17.5 18Z"/></svg><span data-i18n="nav.providers"></span></button>
+      <button data-v="routing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H12a3 3 0 0 1 3 3v.5M8.5 18H12a3 3 0 0 0 3-3v-.5"/></svg><span data-i18n="nav.routing"></span></button>
+      <button data-v="agents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 7V4m6 3V4M8 10h8a2 2 0 0 1 2 2v3a5 5 0 0 1-10 0v-3a2 2 0 0 1 2-2Z"/></svg><span data-i18n="nav.agents"></span></button>
+      <button data-v="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10 2.1 2.1m0-14.2-2.1 2.1m-10 10-2.1 2.1"/></svg><span data-i18n="nav.settings"></span></button>
+    </nav>
+    <div class="side-foot">
+      <button id="collapse-btn" title="⇧"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button id="lang-btn">EN</button>
     </div>
-    <h3 class="muted" data-i18n="ov.recent"></h3>
-    <table><thead><tr><th data-i18n="col.time"></th><th>Agent</th><th data-i18n="col.group"></th><th>Provider</th><th>Model</th>
-      <th data-i18n="col.status"></th><th>Token</th><th data-i18n="col.cost"></th><th data-i18n="col.dur"></th><th data-i18n="col.chain"></th></tr></thead>
-      <tbody id="ov-recent"></tbody></table>
-  </section>
+  </aside>
+  <div class="main">
+    <header class="top"><h2 id="tb-title"></h2><div class="pills" id="tb-pills"></div></header>
+    <main id="content">
 
-  <section id="v-providers" class="view">
-    <div class="toolbar"><button class="act" onclick="loadProviders()" data-i18n="refresh"></button>
-      <span class="muted" data-i18n="pv.hint"></span></div>
-    <table><thead><tr><th>Provider</th><th>Vendor</th><th data-i18n="col.status"></th><th data-i18n="pv.quota"></th>
-      <th data-i18n="pv.lastfail"></th><th data-i18n="col.ops"></th></tr></thead><tbody id="pv-rows"></tbody></table>
-    <div class="msg muted" id="pv-msg"></div>
-  </section>
+      <section id="v-overview" class="view on">
+        <div class="toolbar">
+          <button class="btn ghost sm" onclick="loadOverview()" data-i18n="common.refresh"></button>
+          <span class="muted" id="ov-date"></span>
+        </div>
+        <div class="cards">
+          <div class="stat"><div class="k" data-i18n="ov.req"></div><div class="v" id="ov-req">-</div></div>
+          <div class="stat"><div class="k" data-i18n="ov.pt"></div><div class="v" id="ov-pt">-</div></div>
+          <div class="stat"><div class="k" data-i18n="ov.ct"></div><div class="v" id="ov-ct">-</div></div>
+          <div class="stat"><div class="k" data-i18n="ov.cost"></div><div class="v" id="ov-cost">-</div></div>
+        </div>
+        <div class="panel">
+          <h3 data-i18n="ov.recent"></h3>
+          <div class="muted" data-i18n="ov.recentHint"></div>
+          <div style="overflow-x:auto;margin-top:8px">
+          <table><thead><tr>
+            <th data-i18n="col.time"></th><th>Agent</th><th data-i18n="col.group"></th><th data-i18n="col.provider"></th><th>Model</th>
+            <th data-i18n="col.status"></th><th data-i18n="col.tokens"></th><th data-i18n="col.cost"></th><th data-i18n="col.dur"></th><th data-i18n="col.chain"></th>
+          </tr></thead><tbody id="ov-recent"></tbody></table>
+          </div>
+        </div>
+      </section>
 
-  <section id="v-routing" class="view">
-    <div class="toolbar"><button class="act" onclick="loadRouting()" data-i18n="refresh"></button>
-      <span class="muted" data-i18n="rt.hint"></span></div>
-    <div id="rt-rows"></div>
-    <div class="msg muted" id="rt-msg"></div>
-  </section>
+      <section id="v-providers" class="view">
+        <div class="toolbar">
+          <button class="btn primary" onclick="openAddWizard()">＋ <span data-i18n="pv.add"></span></button>
+          <button class="btn ghost sm" onclick="loadProviders()" data-i18n="common.refresh"></button>
+          <span class="muted" data-i18n="pv.hint"></span>
+        </div>
+        <div class="pgrid" id="pv-grid"></div>
+      </section>
 
-  <section id="v-agents" class="view">
-    <div class="toolbar"><button class="act" onclick="loadAgents()" data-i18n="refresh"></button>
-      <span class="muted" data-i18n="ag.hint"></span></div>
-    <table><thead><tr><th>Agent</th><th data-i18n="ag.adapter"></th><th data-i18n="col.status"></th><th data-i18n="ag.defgroup"></th>
-      <th data-i18n="col.ops"></th></tr></thead><tbody id="ag-rows"></tbody></table>
-    <div class="msg" id="ag-msg"></div>
-    <pre id="ag-diff" style="display:none"></pre>
-  </section>
+      <section id="v-routing" class="view">
+        <div class="toolbar">
+          <button class="btn primary" onclick="openGroup()">＋ <span data-i18n="rt.add"></span></button>
+          <button class="btn ghost sm" onclick="loadRouting()" data-i18n="common.refresh"></button>
+          <span class="muted" data-i18n="rt.hint"></span>
+        </div>
+        <div id="rt-grid"></div>
+      </section>
 
-  <section id="v-config" class="view">
-    <div class="group">
-      <h3 data-i18n="qa.title"></h3>
-      <div class="toolbar">
-        <select id="qa-vendor" onchange="populatePlans()"></select>
-        <select id="qa-plan"></select>
-        <input id="qa-key" type="password" autocomplete="off" data-i18n-ph="qa.keyph">
-        <button class="act" onclick="addProvider()" data-i18n="qa.add"></button>
-      </div>
-      <div class="muted" data-i18n="qa.hint"></div>
-      <div class="msg muted" id="qa-msg"></div>
-    </div>
-    <div class="toolbar">
-      <button class="act" onclick="loadConfig()" data-i18n="cfg.load"></button>
-      <button class="act" onclick="saveConfig()" data-i18n="cfg.save"></button>
-      <button class="act" onclick="exportConfig()" data-i18n="cfg.export"></button>
-      <button class="act" onclick="copyConfig()" data-i18n="cfg.copy"></button>
-      <span class="muted" data-i18n="cfg.hint"></span></div>
-    <div class="msg muted" id="cfg-msg"></div>
-    <textarea id="cfg-text" spellcheck="false" style="width:100%;height:60vh;background:var(--panel);
-      color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px;
-      font:13px/1.5 ui-monospace,monospace;resize:vertical"></textarea>
-  </section>
-</main>
+      <section id="v-agents" class="view">
+        <div class="toolbar">
+          <button class="btn primary" onclick="openAgent()">＋ <span data-i18n="ag.add"></span></button>
+          <button class="btn ghost sm" onclick="loadAgents()" data-i18n="common.refresh"></button>
+          <span class="muted" data-i18n="ag.hint"></span>
+        </div>
+        <div class="panel" style="padding:4px 10px;overflow-x:auto">
+          <table><thead><tr>
+            <th>Agent</th><th data-i18n="ag.adapter"></th><th data-i18n="col.status"></th>
+            <th data-i18n="ag.defgroup"></th><th data-i18n="col.ops"></th>
+          </tr></thead><tbody id="ag-rows"></tbody></table>
+        </div>
+      </section>
+
+      <section id="v-settings" class="view">
+        <div class="panel">
+          <h3 data-i18n="st.gateway"></h3>
+          <div class="muted" data-i18n="st.gatewayHint"></div>
+          <div class="grid2" style="margin-top:12px">
+            <label class="f"><span data-i18n="st.addr"></span><input id="gw-addr" type="text"></label>
+            <label class="f"><span data-i18n="st.uiAddr"></span><input id="gw-uiaddr" type="text"></label>
+            <label class="f"><span data-i18n="st.retain"></span><input id="gw-retain" type="number" min="1"></label>
+            <label class="ck" style="margin-top:26px"><input id="gw-expose" type="checkbox"><span data-i18n="st.expose"></span></label>
+          </div>
+          <button class="btn primary" onclick="saveGateway()" data-i18n="st.saveGw"></button>
+        </div>
+        <div class="panel">
+          <h3 data-i18n="st.backup"></h3>
+          <div class="muted" data-i18n="st.backupHint"></div>
+          <hr class="sep">
+          <div class="toolbar" style="margin-bottom:10px"><b class="muted" data-i18n="st.exportB"></b></div>
+          <div class="mrow">
+            <input id="bk-exp-pw" type="password" style="flex:1" data-i18n-ph="st.exportPw">
+            <button class="btn" onclick="exportBackup()" data-i18n="st.doExport"></button>
+          </div>
+          <hr class="sep">
+          <div class="toolbar" style="margin-bottom:10px"><b class="muted" data-i18n="st.importB"></b></div>
+          <div class="mrow">
+            <input id="bk-imp-file" type="file" accept=".aback" style="flex:1;border:none;padding:4px 0">
+          </div>
+          <div class="mrow">
+            <input id="bk-imp-pw" type="password" style="flex:1" data-i18n-ph="st.importPw">
+            <button class="btn" onclick="importBackup()" data-i18n="st.doImport"></button>
+          </div>
+          <div class="muted" style="border:1px solid #4a3d1e;background:#1d1810;color:var(--warn);border-radius:8px;padding:8px 12px;margin-top:6px" data-i18n="st.warnKeys"></div>
+        </div>
+        <details class="adv">
+          <summary data-i18n="st.adv"></summary>
+          <div class="adv-body">
+            <div class="muted" data-i18n="st.advHint"></div>
+            <div class="toolbar" style="margin:10px 0">
+              <button class="btn ghost sm" onclick="loadConfig()" data-i18n="st.load"></button>
+              <button class="btn primary sm" onclick="saveConfig()" data-i18n="st.saveY"></button>
+              <button class="btn ghost sm" onclick="exportYaml()" data-i18n="st.exportY"></button>
+              <button class="btn ghost sm" onclick="copyConfig()" data-i18n="st.copyY"></button>
+              <span class="muted" id="cfg-path"></span>
+            </div>
+            <textarea id="cfg-text" spellcheck="false" rows="22" style="font:12px/1.55 ui-monospace,Consolas,monospace;resize:vertical"></textarea>
+          </div>
+        </details>
+      </section>
+
+    </main>
+  </div>
+</div>
+<div id="modal-mask">
+  <div id="modal-box">
+    <div id="modal-head"><b id="modal-title"></b><button id="modal-x" onclick="closeModal()">×</button></div>
+    <div id="modal-body"></div>
+    <div id="modal-foot"></div>
+  </div>
+</div>
+<div id="toasts"></div>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -141,52 +311,54 @@ const tstr = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString() : "-";
 // ---------------- i18n ----------------
 const I18N = {
   zh: {
-    sub: "本地网关", refresh: "刷新",
     "nav.overview": "概览", "nav.providers": "服务商", "nav.routing": "路由",
-    "nav.agents": "接入器", "nav.config": "配置",
-    "ov.req": "今日请求", "ov.cost": "费用估算", "ov.recent": "最近 20 条",
-    "col.time": "时间", "col.group": "组", "col.status": "状态", "col.cost": "费用",
-    "col.dur": "耗时", "col.chain": "失败链", "col.ops": "操作",
-    "ov.none": "暂无记录", "ov.date": "日期",
-    "pv.hint": "额度 = 当日软上限（保守系数×收紧系数）", "pv.quota": "当日 tokens / 软上限",
-    "pv.lastfail": "最近失败", "pv.none": "无 provider", "pv.nquota": "未设额度",
-    "pv.test": "测试", "pv.enable": "启用", "pv.disable": "停用",
-    "rt.hint": "↑↓ 调整优先级即时写回 config.yaml 并热重载",
-    "rt.prio": "优先级", "rt.model": "Model", "rt.tune": "调整", "rt.none": "无路由组",
-    "ag.hint": "attach 只写占位 Key；detach 从备份逐字节还原",
-    "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.attached": "已接入",
-    "ag.drifted": "漂移", "ag.off": "未接入", "ag.none": "配置中无 agent",
-    "ag.preview": "预览", "ag.attach": "接入", "ag.detach": "还原",
-    "qa.title": "快速添加服务商", "qa.keyph": "粘贴 API Key",
-    "qa.add": "添加", "qa.pickv": "选择厂商", "qa.pickp": "选择套餐",
-    "qa.hint": "选择厂商与套餐、粘贴 Key 即可；Key 只写入本机 env 文件（600），不进配置。",
-    "cfg.load": "读取当前配置", "cfg.save": "保存并应用", "cfg.export": "导出下载",
-    "cfg.copy": "复制全文",
-    "cfg.hint": "保存即校验（失败不落盘），成功后自动热重载；API Key 只存在于网关环境变量，不在配置中",
+    "nav.agents": "接入器", "nav.settings": "设置",
+    "common.refresh": "刷新", "common.cancel": "取消", "common.confirm": "确定",
+    "col.time": "时间", "col.group": "组", "col.provider": "服务商", "col.status": "状态",
+    "col.tokens": "Tokens", "col.cost": "费用", "col.dur": "耗时", "col.chain": "失败链", "col.ops": "操作",
+    "ov.req": "今日请求", "ov.pt": "输入 Tokens", "ov.ct": "输出 Tokens", "ov.cost": "费用估算",
+    "ov.recent": "最近请求", "ov.recentHint": "按 UTC 日期统计，展示最近 20 条",
+    "pv.add": "添加服务商", "pv.hint": "API Key 仅存于本机 env 文件（0600），绝不写入配置",
+    "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
+    "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
+    "ag.adapter": "适配器", "ag.defgroup": "默认组",
+    "st.gateway": "网关", "st.gatewayHint": "监听地址修改后需重启进程才会生效",
+    "st.addr": "网关监听地址（API）", "st.uiAddr": "控制台监听地址（UI）",
+    "st.retain": "日志保留天数", "st.expose": "将路由组暴露为 group/ 虚拟模型",
+    "st.saveGw": "保存网关设置",
+    "st.backup": "加密备份", "st.backupHint": "备份包含完整配置与全部 API Key，经 Argon2id + AES-256-GCM 加密",
+    "st.exportB": "导出备份", "st.exportPw": "设置备份密码", "st.doExport": "导出 .aback",
+    "st.importB": "导入备份", "st.importPw": "输入备份密码", "st.doImport": "选择文件并导入",
+    "st.warnKeys": "⚠ 备份文件包含密钥，请设置足够强的密码；忘记密码将无法恢复。",
+    "st.adv": "高级：直接编辑 config.yaml",
+    "st.advHint": "保存即校验（失败不落盘），成功后自动热重载。日常操作建议用上面的表单界面。",
+    "st.load": "读取当前配置", "st.saveY": "保存并应用", "st.exportY": "下载 YAML", "st.copyY": "复制全文",
+    "st.copied": "已复制到剪贴板",
   },
   en: {
-    sub: "Local gateway", refresh: "Refresh",
     "nav.overview": "Overview", "nav.providers": "Providers", "nav.routing": "Routing",
-    "nav.agents": "Agents", "nav.config": "Config",
-    "ov.req": "Requests today", "ov.cost": "Est. cost", "ov.recent": "Last 20 requests",
-    "col.time": "Time", "col.group": "Group", "col.status": "Status", "col.cost": "Cost",
-    "col.dur": "Duration", "col.chain": "Fail chain", "col.ops": "Actions",
-    "ov.none": "No records", "ov.date": "Date",
-    "pv.hint": "Quota = daily soft cap (conservative × tightened)", "pv.quota": "Tokens today / soft cap",
-    "pv.lastfail": "Last failure", "pv.none": "No providers", "pv.nquota": "no quota",
-    "pv.test": "Test", "pv.enable": "Enable", "pv.disable": "Disable",
-    "rt.hint": "↑↓ reorder writes back to config.yaml with hot reload",
-    "rt.prio": "Priority", "rt.model": "Model", "rt.tune": "Tune", "rt.none": "No routing groups",
-    "ag.hint": "attach writes placeholder keys; detach restores from backup byte-for-byte",
-    "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.attached": "Attached",
-    "ag.drifted": "Drifted", "ag.off": "Detached", "ag.none": "No agents in config",
-    "ag.preview": "Preview", "ag.attach": "Attach", "ag.detach": "Restore",
-    "qa.title": "Quick add provider", "qa.keyph": "Paste API key",
-    "qa.add": "Add", "qa.pickv": "Pick vendor", "qa.pickp": "Pick plan",
-    "qa.hint": "Pick a vendor and plan, paste the key. The key is stored only in the local env file (600), never in config.",
-    "cfg.load": "Load current config", "cfg.save": "Save & apply", "cfg.export": "Export",
-    "cfg.copy": "Copy all",
-    "cfg.hint": "Save validates first (nothing is written on failure) and hot-reloads on success; API keys live only in gateway env vars, not in config",
+    "nav.agents": "Agents", "nav.settings": "Settings",
+    "common.refresh": "Refresh", "common.cancel": "Cancel", "common.confirm": "OK",
+    "col.time": "Time", "col.group": "Group", "col.provider": "Provider", "col.status": "Status",
+    "col.tokens": "Tokens", "col.cost": "Cost", "col.dur": "Duration", "col.chain": "Fail chain", "col.ops": "Actions",
+    "ov.req": "Requests today", "ov.pt": "Prompt tokens", "ov.ct": "Completion tokens", "ov.cost": "Est. cost",
+    "ov.recent": "Recent requests", "ov.recentHint": "UTC day, last 20 requests",
+    "pv.add": "Add provider", "pv.hint": "API keys live only in the local env file (0600), never in config",
+    "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
+    "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
+    "ag.adapter": "Adapter", "ag.defgroup": "Default group",
+    "st.gateway": "Gateway", "st.gatewayHint": "Changing listen addresses requires a process restart",
+    "st.addr": "Gateway listen address (API)", "st.uiAddr": "Console listen address (UI)",
+    "st.retain": "Log retention days", "st.expose": "Expose routing groups as group/ virtual models",
+    "st.saveGw": "Save gateway settings",
+    "st.backup": "Encrypted backup", "st.backupHint": "Backup contains the full config and all API keys, sealed with Argon2id + AES-256-GCM",
+    "st.exportB": "Export backup", "st.exportPw": "Choose a backup password", "st.doExport": "Export .aback",
+    "st.importB": "Import backup", "st.importPw": "Backup password", "st.doImport": "Pick file & import",
+    "st.warnKeys": "⚠ The backup contains secrets — choose a strong password; it cannot be recovered without it.",
+    "st.adv": "Advanced: edit config.yaml directly",
+    "st.advHint": "Saving validates first (nothing is written on failure) and hot-reloads on success. Prefer the forms above for daily use.",
+    "st.load": "Load current config", "st.saveY": "Save & apply", "st.exportY": "Download YAML", "st.copyY": "Copy all",
+    "st.copied": "Copied to clipboard",
   },
 };
 let lang = localStorage.getItem("buffet-lang")
@@ -199,13 +371,15 @@ function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
   document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
   $("lang-btn").textContent = lang === "zh" ? "EN" : "中";
-  populateCatalog();
+  $("tb-title").textContent = t("nav." + curView);
+  renderPills();
+  const fn = window[LOADERS[curView]];
+  if (fn) fn();
 }
 function toggleLang() {
   lang = lang === "zh" ? "en" : "zh";
   localStorage.setItem("buffet-lang", lang);
   applyLang();
-  LOADERS[curView]();
 }
 
 async function api(path, opts) {
@@ -218,240 +392,555 @@ const post = (path, body) => api(path, {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
 });
 
-let curView = "overview";
-const LOADERS = { overview: loadOverview, providers: loadProviders,
-  routing: loadRouting, agents: loadAgents, config: loadConfigView };
-document.querySelectorAll("nav button[data-v]").forEach(b => b.onclick = () => {
-  document.querySelectorAll("nav button[data-v]").forEach(x => x.classList.toggle("on", x === b));
-  document.querySelectorAll(".view").forEach(v => v.classList.remove("on"));
-  $("v-" + b.dataset.v).classList.add("on");
-  curView = b.dataset.v;
-  LOADERS[b.dataset.v]();
-});
+// ---------------- toast / modal ----------------
+function toast(msg, type = "info") {
+  const d = document.createElement("div");
+  d.className = "toast " + type;
+  d.textContent = msg;
+  $("toasts").appendChild(d);
+  setTimeout(() => { d.style.opacity = "0"; d.style.transition = "opacity .3s"; }, 3500);
+  setTimeout(() => d.remove(), 3900);
+}
+function openModal(title, body, foot) {
+  $("modal-title").textContent = title;
+  $("modal-body").innerHTML = body;
+  $("modal-foot").innerHTML = foot;
+  $("modal-mask").classList.add("on");
+}
+function closeModal() { $("modal-mask").classList.remove("on"); }
+$("modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+function confirmM(title, msg) {
+  return new Promise((res) => {
+    openModal(title, `<div style="white-space:pre-wrap">${esc(msg)}</div>`,
+      `<button class="btn ghost" id="cf-no">${esc(t("common.cancel"))}</button>` +
+      `<button class="btn primary" id="cf-yes">${esc(t("common.confirm"))}</button>`);
+    $("cf-no").onclick = () => { closeModal(); res(false); };
+    $("cf-yes").onclick = () => { closeModal(); res(true); };
+  });
+}
 
-// ---------------- Overview ----------------
+// ---------------- shell ----------------
+const state = { gw: null, providers: [], groups: [], agents: [], catalog: null, totals: null, date: "" };
+function renderPills() {
+  const p = [];
+  if (state.gw) p.push(`<span class="chip">API ${esc(state.gw.addr)}</span><span class="chip">UI ${esc(state.gw.ui_addr)}</span>`);
+  if (state.providers.length) {
+    const ok = state.providers.filter(x => x.status === "ok").length;
+    p.push(`<span class="pill ${ok === state.providers.length ? "on" : "warn"}"><i></i>${ok}/${state.providers.length} ${esc(L("服务商", "providers"))}</span>`);
+  }
+  if (state.totals) p.push(`<span class="pill dim"><i></i>${fmt(state.totals.requests)} ${esc(L("今日请求", "req today"))}</span>`);
+  $("tb-pills").innerHTML = p.join("");
+}
+let curView = "overview";
+const LOADERS = { overview: "loadOverview", providers: "loadProviders",
+  routing: "loadRouting", agents: "loadAgents", settings: "loadSettings" };
+function switchView(v) {
+  curView = v;
+  document.querySelectorAll("#nav button").forEach(x => x.classList.toggle("on", x.dataset.v === v));
+  document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
+  $("v-" + v).classList.add("on");
+  $("tb-title").textContent = t("nav." + v);
+  window[LOADERS[v]]();
+}
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => switchView(b.dataset.v));
+$("collapse-btn").onclick = () => {
+  document.body.classList.toggle("sb-collapsed");
+  $("collapse-btn").querySelector("svg").style.transform = document.body.classList.contains("sb-collapsed") ? "rotate(180deg)" : "";
+};
+$("lang-btn").onclick = toggleLang;
+
+// ---------------- overview ----------------
 async function loadOverview() {
   try {
     const j = await api("/api/overview");
-    $("ov-date").textContent = t("ov.date") + " " + j.date;
+    state.totals = j.totals; state.date = j.date; renderPills();
+    $("ov-date").textContent = L("日期", "Date") + " " + j.date;
     $("ov-req").textContent = fmt(j.totals.requests);
     $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
     $("ov-ct").textContent = fmt(j.totals.completion_tokens);
-    $("ov-cost").textContent = (j.totals.cost_est ?? 0).toFixed(4);
+    $("ov-cost").textContent = "$" + (j.totals.cost_est ?? 0).toFixed(4);
     $("ov-recent").innerHTML = (j.recent || []).map(e => `<tr>
-      <td>${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
+      <td class="muted">${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
       <td>${esc(e.provider)}</td><td>${esc(e.model)}</td>
-      <td><span class="badge ${e.status < 400 ? "ok" : "bad"}">${e.status}</span></td>
-      <td>${fmt(e.prompt_tokens)}/${fmt(e.completion_tokens)}</td>
-      <td>${e.cost_est == null ? "-" : e.cost_est.toFixed(4)}</td>
-      <td>${e.duration_ms}ms</td><td class="muted">${esc((e.fail_chain || []).join(" → "))}</td>
-    </tr>`).join("") || `<tr><td colspan="10" class="muted">${t("ov.none")}</td></tr>`;
-  } catch (err) { $("ov-recent").innerHTML = `<tr><td colspan="10">${esc(err.message)}</td></tr>`; }
+      <td><span class="pill ${e.status < 400 ? "on" : "off"}"><i></i>${e.status}</span></td>
+      <td class="muted">${fmt(e.prompt_tokens)} / ${fmt(e.completion_tokens)}</td>
+      <td>${e.cost_est == null ? "-" : "$" + e.cost_est.toFixed(4)}</td>
+      <td class="muted">${e.duration_ms} ms</td>
+      <td class="muted">${esc((e.fail_chain || []).join(" → "))}</td>
+    </tr>`).join("")
+      || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
+  } catch (err) { toast(err.message, "bad"); }
 }
-
-// ---------------- Providers ----------------
-const stBadge = (s) => ({ ok: "ok", disabled: "dim", degraded: "bad",
-  circuit_open: "warn", quota_exhausted: "warn" })[s] || "dim";
+</script>
+<script>
+"use strict";
+// ---------------- providers ----------------
+const STP = { ok: "on", disabled: "dim", degraded: "off", circuit_open: "warn", quota_exhausted: "warn" };
+const stLabel = (s) => ({
+  ok: L("正常", "healthy"), disabled: L("已停用", "disabled"), degraded: L("降级", "degraded"),
+  circuit_open: L("熔断中", "circuit open"), quota_exhausted: L("额度用尽", "quota exhausted"),
+}[s] || s);
 
 async function loadProviders() {
-  $("pv-msg").textContent = "";
   try {
-    const rows = await api("/api/providers");
-    $("pv-rows").innerHTML = rows.map(p => {
-      const cap = p.effective_cap ?? p.quota_daily;
-      const pct = cap ? Math.min(100, Math.round((p.tokens_used / cap) * 100)) : 0;
-      const quota = cap ? `<div class="bar"><i style="width:${pct}%"></i></div>
-        <span class="muted">${fmt(p.tokens_used)} / ${fmt(cap)}（${pct}%）</span>`
-        : `<span class="muted">${fmt(p.tokens_used)}（${t("pv.nquota")}）</span>`;
-      const fail = p.last_fail_reason ? `${esc(p.last_fail_reason)} · ${tstr(p.last_fail_ts)}` : "-";
-      const dis = p.status === "disabled";
-      return `<tr><td>${esc(p.id)}</td><td>${esc(p.vendor)}</td>
-        <td><span class="badge ${stBadge(p.status)}">${esc(p.status)}</span></td>
-        <td>${quota}</td><td class="muted">${fail}</td>
-        <td><button class="act" onclick="testPv('${esc(p.id)}')">${t("pv.test")}</button>
-        <button class="act ${dis ? "" : "danger"}" onclick="togglePv('${esc(p.id)}',${dis})">${dis ? t("pv.enable") : t("pv.disable")}</button></td></tr>`;
-    }).join("") || `<tr><td colspan="6" class="muted">${t("pv.none")}</td></tr>`;
-  } catch (err) { $("pv-msg").textContent = err.message; }
+    state.providers = await api("/api/providers");
+    renderPills();
+    const rows = state.providers;
+    $("pv-grid").innerHTML = rows.map(p => {
+      const cap = p.effective_cap, used = p.tokens_used || 0;
+      const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0;
+      const quota = cap
+        ? `<div class="quota"><div class="bar"><i class="${pct >= 100 ? "full" : pct >= 80 ? "hot" : ""}" style="width:${pct}%"></i></div><span>${fmt(used)} / ${fmt(cap)}</span></div>`
+        : `<div class="quota"><span class="muted">${esc(L("未设每日额度", "no daily quota"))}</span></div>`;
+      const fail = p.last_fail_reason
+        ? `<div class="muted" style="color:var(--off)">✕ ${esc(p.last_fail_reason)} · ${tstr(p.last_fail_ts)}</div>` : "";
+      const open = p.circuit_open_until
+        ? `<div class="muted" style="color:var(--warn)">⏸ ${esc(L("熔断至", "open until"))} ${tstr(p.circuit_open_until)}</div>` : "";
+      const models = (p.models || []).length;
+      return `<div class="pcard">
+        <div class="pc-top"><span class="chip">${esc(p.vendor)}</span>
+          <span class="pill ${STP[p.status] || "dim"}"><i></i>${esc(stLabel(p.status))}</span>
+          <span style="margin-left:auto" class="muted">${models} ${esc(L("模型", "models"))}</span></div>
+        <div class="pc-id">${esc(p.id)}</div>
+        ${quota}${fail}${open}
+        <div class="pc-ops">
+          <button class="btn sm" onclick="testProvider('${esc(p.id)}',this)">${esc(L("测试", "Test"))}</button>
+          <button class="btn sm ghost" onclick="openEdit('${esc(p.id)}')">${esc(L("编辑", "Edit"))}</button>
+          <button class="btn sm ghost" onclick="toggleDisabled('${esc(p.id)}')">${p.disabled || p.status === "disabled" ? esc(L("启用", "Enable")) : esc(L("停用", "Disable"))}</button>
+          <button class="btn sm danger" onclick="delProvider('${esc(p.id)}')">${esc(L("删除", "Delete"))}</button>
+        </div></div>`;
+    }).join("") || `<div class="empty" style="grid-column:1/-1"><div class="big">🛒</div><b>${esc(L("还没有服务商", "No providers yet"))}</b>${esc(L("点右上角「添加服务商」，选厂商 → 选套餐 → 贴 Key，三步完成", "Click “Add provider”: pick vendor → pick plan → paste key. Three steps."))}</div>`;
+  } catch (err) { toast(err.message, "bad"); }
 }
-async function testPv(id) {
-  $("pv-msg").textContent = L("测试 ", "Testing ") + id + " …";
+
+async function catalog() {
+  if (!state.catalog) state.catalog = await api("/api/vendor-catalog");
+  return state.catalog;
+}
+
+async function openAddWizard() {
+  let vs;
+  try { vs = await catalog(); } catch (err) { return toast(err.message, "bad"); }
+  const vn = (v) => lang === "zh" ? v.name_zh : v.name_en;
+  const pl = (p) => lang === "zh" ? p.label_zh : p.label_en;
+  openModal(L("添加服务商", "Add provider"), `
+    <label class="f"><span>${esc(L("厂商", "Vendor"))}</span>
+      <select id="wz-vendor">${vs.map((v, i) => `<option value="${i}">${esc(vn(v))}</option>`).join("")}</select></label>
+    <label class="f"><span>${esc(L("套餐 / 接入方式", "Plan"))}</span><select id="wz-plan"></select></label>
+    <div class="muted" id="wz-info" style="margin:-4px 0 12px"></div>
+    <label class="f"><span>API Key</span><input id="wz-key" type="password" autocomplete="off" placeholder="${esc(L("粘贴 API Key", "Paste API key"))}"></label>
+    <div class="muted">${esc(L("Key 只写入本机 env 文件（0600），不会进入 config.yaml。", "The key is stored only in the local env file (0600), never in config.yaml."))}</div>`,
+    `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
+     <button class="btn primary" id="wz-ok">${esc(L("添加", "Add"))}</button>`);
+  const fill = () => {
+    const v = vs[+$("wz-vendor").value];
+    const psel = $("wz-plan");
+    psel.innerHTML = v.plans.map((p, i) => `<option value="${i}">${esc(pl(p))}</option>`).join("");
+    if (v.plans.length === 1) psel.value = "0";
+    show();
+  };
+  const show = () => {
+    const v = vs[+$("wz-vendor").value];
+    const p = v.plans[+$("wz-plan").value];
+    $("wz-info").textContent = p.base_url + " · " + (p.models || []).length + " " + L("预置模型", "preset models");
+  };
+  $("wz-vendor").onchange = fill;
+  $("wz-plan").onchange = show;
+  fill();
+  $("wz-ok").onclick = async () => {
+    const v = vs[+$("wz-vendor").value];
+    const p = v.plans[+$("wz-plan").value];
+    const key = $("wz-key").value.trim();
+    if (!key) return toast(L("请输入 API Key", "Please paste the API key"), "warn");
+    $("wz-ok").disabled = true;
+    try {
+      const r = await post("/_admin/provider", { vendor: v.id, plan: p.id, api_key: key });
+      closeModal();
+      (r.warnings || []).forEach(w => toast(w, "warn"));
+      toast(L("已添加 ", "Added ") + v.id + "/" + p.id + L("，模型列表已自动同步", ", model list synced"), "ok");
+      loadProviders();
+    } catch (err) { toast(err.message, "bad"); $("wz-ok").disabled = false; }
+  };
+}
+
+async function openEdit(id) {
+  const p = state.providers.find(x => x.id === id);
+  if (!p) return;
+  openModal(L("编辑服务商", "Edit provider") + " · " + id, `
+    <label class="f"><span>Base URL</span><input id="ed-url" type="text" value="${esc(p.base_url || "")}"></label>
+    <div class="grid2">
+      <label class="f"><span>${esc(L("每日额度（tokens，0 表示不修改）", "Daily quota (tokens, 0 = keep)"))}</span>
+        <input id="ed-quota" type="number" min="0" placeholder="${p.quota_daily ?? 0}"></label>
+      <label class="f"><span>${esc(L("更换 API Key（留空不变）", "New API key (empty = keep)"))}</span>
+        <input id="ed-key" type="password" autocomplete="off"></label>
+    </div>
+    <label class="f"><span>${esc(L("模型列表（每行一个）", "Models (one per line)"))}</span>
+      <textarea id="ed-models" rows="6" spellcheck="false" style="font:12px/1.55 ui-monospace,Consolas,monospace">${esc((p.models || []).join("\n"))}</textarea></label>
+    <label class="ck"><input id="ed-priv" type="checkbox" ${p.allow_private ? "checked" : ""}>${esc(L("允许私人模型（不在目录中的模型名）", "Allow private models not in the catalog"))}</label>
+    <label class="ck"><input id="ed-off" type="checkbox" ${p.disabled ? "checked" : ""}>${esc(L("停用（保留配置，不参与路由）", "Disabled (kept in config, skipped by routing)"))}</label>`,
+    `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
+     <button class="btn primary" id="ed-ok">${esc(L("保存", "Save"))}</button>`);
+  $("ed-ok").onclick = async () => {
+    $("ed-ok").disabled = true;
+    const body = {
+      id,
+      base_url: $("ed-url").value.trim(),
+      models: $("ed-models").value.split("\n").map(s => s.trim()).filter(Boolean),
+      quota_daily: +$("ed-quota").value || 0,
+      allow_private: $("ed-priv").checked,
+      disabled: $("ed-off").checked,
+    };
+    const k = $("ed-key").value.trim();
+    if (k) body.api_key = k;
+    try {
+      await post("/_admin/provider/edit", body);
+      closeModal(); toast(L("已保存并热重载", "Saved & hot-reloaded"), "ok"); loadProviders();
+    } catch (err) { toast(err.message, "bad"); $("ed-ok").disabled = false; }
+  };
+}
+
+async function delProvider(id) {
+  if (!await confirmM(L("删除服务商", "Delete provider"),
+    L(`将删除 ${id} 并自动清理路由组中引用它的成员。\nenv 中的 API Key 会保留，可被同名厂商复用。\n确定删除？`,
+      `Provider ${id} will be removed and its members cleaned from routing groups.\nThe API key stays in the env file and can be reused.\nDelete?`))) return;
+  try {
+    const r = await post("/_admin/provider/delete", { id });
+    (r.warnings || []).forEach(w => toast(w, "warn"));
+    toast(L("已删除 ", "Deleted ") + id, "ok"); loadProviders();
+  } catch (err) { toast(err.message, "bad"); }
+}
+
+async function testProvider(id, btn) {
+  btn.disabled = true; btn.textContent = "…";
   try {
     const r = await post("/_admin/routing/test", { provider: id });
-    $("pv-msg").textContent = `${id}: ${r.ok ? "OK" : L("失败", "failed")} status=${r.status ?? "-"} ${L("耗时", "latency")}=${r.latency_ms ?? "-"}ms ${r.error ?? ""}`;
-  } catch (err) { $("pv-msg").textContent = err.message; }
-}
-async function togglePv(id, nowDisabled) {
-  try { await post("/_admin/routing", { provider: id, disabled: !nowDisabled }); loadProviders(); }
-  catch (err) { $("pv-msg").textContent = err.message; }
+    if (r.ok) toast(`${id} ✓ ${r.status} · ${r.latency_ms} ms`, "ok");
+    else toast(`${id} ✕ ${r.error || r.status}`, "bad");
+  } catch (err) { toast(err.message, "bad"); }
+  btn.disabled = false; btn.textContent = L("测试", "Test");
 }
 
-// ---------------- Routing ----------------
-let rtGroups = [];
+async function toggleDisabled(id) {
+  const p = state.providers.find(x => x.id === id);
+  if (!p) return;
+  try {
+    await post("/_admin/provider/edit", { id, disabled: !(p.disabled || p.status === "disabled") });
+    toast(L("已更新", "Updated"), "ok"); loadProviders();
+  } catch (err) { toast(err.message, "bad"); }
+}
+</script>
+<script>
+"use strict";
+// ---------------- routing ----------------
 async function loadRouting() {
-  $("rt-msg").textContent = "";
   try {
-    rtGroups = (await api("/api/routing")).groups || [];
-    $("rt-rows").innerHTML = rtGroups.map((g, gi) => `<div class="group"><h3>${esc(g.name)}
-      <span class="muted">（${esc(g.strategy)}）</span></h3><table><thead>
-      <tr><th>${t("rt.prio")}</th><th>Provider</th><th>${t("rt.model")}</th><th>${t("col.status")}</th><th>${t("rt.tune")}</th></tr></thead><tbody>`
-      + g.members.map((m, mi) => `<tr><td>${m.priority}</td><td>${esc(m.provider)}</td>
-        <td>${esc(m.model)}</td>
-        <td><span class="badge ${m.disabled ? "dim" : "ok"}">${m.disabled ? t("pv.disable") : t("pv.enable")}</span></td>
-        <td><button class="act" onclick="move(${gi},${mi},-1)">↑</button>
-        <button class="act" onclick="move(${gi},${mi},1)">↓</button>
-        <button class="act ${m.disabled ? "" : "danger"}" onclick="dis(${gi},'${esc(m.provider)}',${m.disabled})">${m.disabled ? t("pv.enable") : t("pv.disable")}</button>
-        </td></tr>`).join("") + "</tbody></table></div>").join("")
-      || `<span class="muted">${t("rt.none")}</span>`;
-  } catch (err) { $("rt-msg").textContent = err.message; }
-}
-async function move(gi, mi, dir) {
-  const g = rtGroups[gi];
-  const j = mi + dir;
-  if (j < 0 || j >= g.members.length) return;
-  const ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority }));
-  [ms[mi].priority, ms[j].priority] = [ms[j].priority, ms[mi].priority];
-  try { await post("/_admin/routing", { group: g.name, members: ms }); loadRouting(); }
-  catch (err) { $("rt-msg").textContent = err.message; }
-}
-async function dis(gi, provider, nowDisabled) {
-  try { await post("/_admin/routing", { provider, disabled: !nowDisabled }); loadRouting(); }
-  catch (err) { $("rt-msg").textContent = err.message; }
+    const j = await api("/api/routing");
+    state.groups = j.groups || [];
+    if (!state.providers.length) state.providers = await api("/api/providers");
+    $("rt-grid").innerHTML = state.groups.map(g => `
+      <div class="gcard">
+        <div class="g-top"><b>${esc(g.name)}</b><span class="chip">order</span>
+          <span class="muted">${g.members.length} ${esc(L("个成员", "members"))}</span>
+          <div class="g-ops">
+            <button class="btn sm ghost" onclick="openGroup('${esc(g.name)}')">${esc(L("编辑", "Edit"))}</button>
+            <button class="btn sm danger" onclick="delGroup('${esc(g.name)}')">${esc(L("删除", "Delete"))}</button>
+          </div></div>
+        <table><thead><tr><th>#</th><th data-i18n="col.provider"></th><th>Model</th><th data-i18n="col.status"></th></tr></thead>
+        <tbody>${g.members.map(m => `<tr><td class="muted">${m.priority}</td><td>${esc(m.provider)}</td>
+          <td><code>${esc(m.model)}</code></td>
+          <td>${m.disabled ? `<span class="pill dim"><i></i>${esc(L("已停用", "disabled"))}</span>` : `<span class="pill on"><i></i>${esc(L("可用", "ready"))}</span>`}</td></tr>`).join("")}</tbody></table>
+      </div>`).join("")
+      || `<div class="empty"><div class="big">🧭</div><b>${esc(L("还没有路由组", "No routing groups yet"))}</b>${esc(L("路由组 = 一组「服务商 + 模型」的优先级列表，故障时自动转移", "A group is a prioritized list of provider/model pairs with automatic failover"))}</div>`;
+    document.querySelectorAll("#rt-grid [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+  } catch (err) { toast(err.message, "bad"); }
 }
 
-// ---------------- Agents ----------------
+let gm = [];
+function providerOpts(sel) {
+  return state.providers.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""}>${esc(p.id)} (${esc(p.vendor)})</option>`).join("");
+}
+function renderMembers() {
+  $("gm-list").innerHTML = gm.map((r, i) => {
+    const p = state.providers.find(x => x.id === r.provider);
+    const ms = (p && p.models) || [];
+    const modelCell = ms.length
+      ? `<select class="mm" data-i="${i}" data-f="model">${ms.map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>`
+      : `<input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}">`;
+    return `<div class="mrow"><span class="chip">#${i + 1}</span>
+      <select class="mp" data-i="${i}" data-f="provider">${providerOpts(r.provider)}</select>
+      ${modelCell}
+      <button class="btn sm ghost" data-act="up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
+      <button class="btn sm ghost" data-act="dn" data-i="${i}" ${i === gm.length - 1 ? "disabled" : ""}>↓</button>
+      <button class="btn sm danger" data-act="rm" data-i="${i}">✕</button></div>`;
+  }).join("");
+  $("gm-list").querySelectorAll("select,input").forEach(el => {
+    el.onchange = () => { gm[+el.dataset.i][el.dataset.f] = el.value; };
+  });
+  $("gm-list").querySelectorAll("button").forEach(b => {
+    b.onclick = () => {
+      const i = +b.dataset.i;
+      if (b.dataset.act === "up" && i > 0) [gm[i - 1], gm[i]] = [gm[i], gm[i - 1]];
+      if (b.dataset.act === "dn" && i < gm.length - 1) [gm[i + 1], gm[i]] = [gm[i], gm[i + 1]];
+      if (b.dataset.act === "rm") gm.splice(i, 1);
+      renderMembers();
+    };
+  });
+}
+async function openGroup(name) {
+  if (!state.providers.length) {
+    try { state.providers = await api("/api/providers"); } catch (err) { return toast(err.message, "bad"); }
+  }
+  if (!state.providers.length) return toast(L("请先添加服务商", "Add a provider first"), "warn");
+  const g = name ? state.groups.find(x => x.name === name) : null;
+  gm = g ? g.members.map(m => ({ provider: m.provider, model: m.model }))
+         : [{ provider: state.providers[0].id, model: (state.providers[0].models || [])[0] || "" }];
+  openModal(name ? L("编辑路由组", "Edit group") + " · " + name : t("rt.add"), `
+    <label class="f"><span>${esc(L("组名", "Group name"))}</span>
+      <input id="gm-name" type="text" value="${esc(name || "")}" ${name ? "disabled" : ""} placeholder="${esc(L("如 default / fast / strong", "e.g. default / fast / strong"))}"></label>
+    ${name ? "" : `<div class="muted" style="margin-top:-6px;margin-bottom:10px">${esc(L("Agent 通过路径识别组：/opencode/v1/chat/completions 走各自默认组；组名可在「接入器」里绑定", "Agents route via their default group; bind a group per agent in the Agents view"))}</div>`}
+    <span class="muted">${esc(L("成员（按顺序尝试，失败自动转移）", "Members (tried in order, failover on error)"))}</span>
+    <div id="gm-list" style="margin:8px 0"></div>
+    <button class="btn sm ghost" id="gm-add">＋ ${esc(L("添加成员", "Add member"))}</button>`,
+    `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
+     <button class="btn primary" id="gm-ok">${esc(L("保存", "Save"))}</button>`);
+  renderMembers();
+  $("gm-add").onclick = () => {
+    const p = state.providers[gm.length % state.providers.length];
+    gm.push({ provider: p.id, model: (p.models || [])[0] || "" });
+    renderMembers();
+  };
+  $("gm-ok").onclick = async () => {
+    const gname = (name || $("gm-name").value).trim();
+    if (!gname) return toast(L("组名不能为空", "Group name required"), "warn");
+    if (!gm.length) return toast(L("至少一个成员", "At least one member"), "warn");
+    for (const r of gm) {
+      if (!r.provider || !String(r.model).trim()) return toast(L("成员的服务商与模型不能为空", "Member provider/model required"), "warn");
+    }
+    $("gm-ok").disabled = true;
+    try {
+      await post("/_admin/group", { name: gname, members: gm.map(r => ({ provider: r.provider, model: String(r.model).trim(), priority: 1 })) });
+      closeModal(); toast(L("路由组已保存并热重载", "Group saved & hot-reloaded"), "ok"); loadRouting();
+    } catch (err) { toast(err.message, "bad"); $("gm-ok").disabled = false; }
+  };
+}
+async function delGroup(name) {
+  if (!await confirmM(L("删除路由组", "Delete group"),
+    L(`确定删除路由组 ${name}？引用它的 Agent 默认组会校验失败，请先调整。`,
+      `Delete group ${name}? Agents pointing at it will fail validation — reassign first.`))) return;
+  try {
+    await post("/_admin/group/delete", { name });
+    toast(L("已删除 ", "Deleted ") + name, "ok"); loadRouting();
+  } catch (err) { toast(err.message, "bad"); }
+}
+
+// ---------------- agents ----------------
 async function loadAgents() {
-  $("ag-msg").textContent = "";
   try {
-    const rows = await api("/api/agents");
+    state.agents = await api("/api/agents");
+    if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
+    const rows = state.agents;
     $("ag-rows").innerHTML = rows.map(a => {
-      const badge = a.attached
-        ? (a.drifted ? `<span class="badge warn">${t("ag.drifted")}</span>` : `<span class="badge ok">${t("ag.attached")}</span>`)
-        : `<span class="badge dim">${t("ag.off")}</span>`;
-      return `<tr><td>${esc(a.agent_id)}</td><td>${esc(a.adapter)}</td>
-        <td>${badge} <span class="muted">${esc(a.note || "")}</span></td>
-        <td class="muted">${esc(a.config_path || "-")}</td>
-        <td><button class="act" onclick="opA('${esc(a.agent_id)}',true)">${t("ag.preview")}</button>
-        <button class="act" onclick="opA('${esc(a.agent_id)}',false)">${t("ag.attach")}</button>
-        <button class="act danger" onclick="deA('${esc(a.agent_id)}')">${t("ag.detach")}</button></td></tr>`;
-    }).join("") || `<tr><td colspan="5" class="muted">${t("ag.none")}</td></tr>`;
-  } catch (err) { $("ag-msg").textContent = err.message; }
+      const stp = a.attached ? (a.drifted ? "warn" : "on") : "dim";
+      const stx = a.attached ? (a.drifted ? L("已接入·漂移", "attached·drifted") : L("已接入", "attached")) : L("未接入", "detached");
+      return `<tr>
+        <td><b>${esc(a.agent_id)}</b>${a.display_name ? ` <span class="muted">${esc(a.display_name)}</span>` : ""}</td>
+        <td><span class="chip">${esc(a.adapter)}</span></td>
+        <td><span class="pill ${stp}"><i></i>${esc(stx)}</span>${a.note ? `<div class="muted">${esc(a.note)}</div>` : ""}</td>
+        <td><code>${esc(a.default_group || "-")}</code></td>
+        <td style="white-space:nowrap">
+          ${a.attached ? `<button class="btn sm ghost" onclick="doDetach('${esc(a.agent_id)}')">${esc(L("还原", "Restore"))}</button>`
+            : `<button class="btn sm primary" onclick="openAttach('${esc(a.agent_id)}')">${esc(L("接入", "Attach"))}</button>`}
+          <button class="btn sm ghost" onclick="openAgent('${esc(a.agent_id)}')">${esc(L("编辑", "Edit"))}</button>
+          <button class="btn sm danger" onclick="delAgent('${esc(a.agent_id)}')">${esc(L("删除", "Delete"))}</button>
+        </td></tr>`;
+    }).join("")
+      || `<tr><td colspan="5"><div class="empty"><div class="big">🤖</div><b>${esc(L("还没有 Agent", "No agents yet"))}</b>${esc(L("Agent 是接入网关的编程助手（opencode / codex / hermes …），新增后一键改写其本地配置", "An agent is a coding tool routed through the gateway. Add one, then attach it in a click"))}</div></td></tr>`;
+  } catch (err) { toast(err.message, "bad"); }
 }
-async function opA(id, dry) {
-  $("ag-msg").textContent = (dry ? t("ag.preview") : t("ag.attach")) + " " + id + " …";
+async function openAgent(id) {
+  if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
+  if (!state.groups.length) return toast(L("请先创建路由组", "Create a routing group first"), "warn");
+  const a = id ? state.agents.find(x => x.agent_id === id) : null;
+  openModal(id ? L("编辑 Agent", "Edit agent") + " · " + id : t("ag.add"), `
+    <label class="f"><span>Agent ID</span>
+      <input id="ag-id" type="text" value="${esc(id || "")}" ${id ? "disabled" : ""} placeholder="${esc(L("如 opencode / codex / my-ide", "e.g. opencode / codex / my-ide"))}"></label>
+    <label class="f"><span>${esc(L("显示名（可选）", "Display name (optional)"))}</span><input id="ag-dn" type="text" value="${esc((a && a.display_name) || "")}"></label>
+    <label class="f"><span>${esc(L("默认路由组", "Default group"))}</span>
+      <select id="ag-grp">${state.groups.map(g => `<option value="${esc(g.name)}" ${a && a.default_group === g.name ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
+    <div class="muted">${esc(L("识别方式：请求路径前缀 /<agent-id>/v1/…，或 model 匹配组名", "Match: path prefix /<agent-id>/v1/…, or model equal to a group name"))}</div>`,
+    `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
+     <button class="btn primary" id="ag-ok">${esc(L("保存", "Save"))}</button>`);
+  $("ag-ok").onclick = async () => {
+    const body = { id: $("ag-id").value.trim() || (id || ""), default_group: $("ag-grp").value, display_name: $("ag-dn").value.trim() };
+    if (!body.id) return toast(L("Agent ID 不能为空", "Agent ID required"), "warn");
+    $("ag-ok").disabled = true;
+    try {
+      await post("/_admin/agent", body);
+      closeModal(); toast(L("已保存并热重载", "Saved & hot-reloaded"), "ok"); loadAgents();
+    } catch (err) { toast(err.message, "bad"); $("ag-ok").disabled = false; }
+  };
+}
+async function delAgent(id) {
+  if (!await confirmM(L("删除 Agent", "Delete agent"),
+    L(`确定从配置删除 ${id}？其本地工具配置不受影响，可在接入器列表「还原」。`,
+      `Remove ${id} from config? Its local tool config stays untouched — use Restore in the list.`))) return;
   try {
-    const r = await post("/api/agents/attach", { agent_id: id, dry_run: dry });
-    $("ag-msg").textContent = r.note || L("完成", "done");
-    const d = (r.files || []).map(f => `--- ${f.path}\n${f.preview}`).join("\n");
-    $("ag-diff").style.display = d ? "block" : "none";
-    $("ag-diff").textContent = d || (r.env_template || "");
-    if (!dry) loadAgents();
-  } catch (err) { $("ag-msg").textContent = err.message; }
+    const r = await post("/_admin/agent/delete", { id });
+    (r.warnings || []).forEach(w => toast(w, "warn"));
+    toast(L("已删除 ", "Deleted ") + id, "ok"); loadAgents();
+  } catch (err) { toast(err.message, "bad"); }
 }
-async function deA(id) {
-  $("ag-msg").textContent = t("ag.detach") + " " + id + " …";
+async function openAttach(id) {
+  if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
+  const a = state.agents.find(x => x.agent_id === id);
+  openModal(L("接入", "Attach") + " · " + id, `
+    <label class="f"><span>${esc(L("绑定路由组", "Routing group"))}</span>
+      <select id="at-grp">${state.groups.map(g => `<option value="${esc(g.name)}" ${a && a.default_group === g.name ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
+    <div class="muted">${esc(L("先预览将改写的文件，确认无误再执行。attach 只写占位 Key，真实 Key 留在网关。", "Preview the file changes first. Attach writes placeholder keys only — real keys stay in the gateway."))}</div>
+    <div id="at-prev"></div>`,
+    `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
+     <button class="btn" id="at-preview">${esc(L("预览改动", "Preview"))}</button>
+     <button class="btn primary" id="at-ok" disabled>${esc(L("确认接入", "Attach"))}</button>`);
+  let previewed = false;
+  $("at-preview").onclick = async () => {
+    try {
+      const r = await post("/api/agents/attach", { agent_id: id, group: $("at-grp").value, dry_run: true });
+      $("at-prev").innerHTML = renderApply(r);
+      previewed = true;
+      $("at-ok").disabled = false;
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  $("at-ok").onclick = async () => {
+    if (!previewed) return;
+    $("at-ok").disabled = true;
+    try {
+      const r = await post("/api/agents/attach", { agent_id: id, group: $("at-grp").value });
+      closeModal();
+      toast(L("已接入 ", "Attached ") + id + (r.note ? " · " + r.note : ""), "ok");
+      loadAgents();
+    } catch (err) { toast(err.message, "bad"); $("at-ok").disabled = false; }
+  };
+}
+function renderApply(r) {
+  let h = `<pre>${esc((r.files || []).map(f => "── " + f.path + "\n" + f.preview).join("\n\n"))}</pre>`;
+  if (r.env_template) h += `<div class="muted">${esc(L("如需真实 Key 直连（一般不需要），可参考：", "Optional env template:"))}</div><pre>${esc(r.env_template)}</pre>`;
+  if (r.note) h += `<div class="muted">${esc(r.note)}</div>`;
+  return h;
+}
+async function doDetach(id) {
+  if (!await confirmM(L("还原配置", "Restore config"),
+    L(`将把 ${id} 的本地配置从备份逐字节还原（撤销接入）。确定？`,
+      `Restore ${id}'s local config byte-for-byte from backup (undo attach). Proceed?`))) return;
   try {
     const r = await post("/api/agents/detach", { agent_id: id });
-    $("ag-msg").textContent = r.note || L("完成", "done");
+    closeModal();
+    toast(L("已还原 ", "Restored ") + id + (r.note ? " · " + r.note : ""), "ok");
     loadAgents();
-  } catch (err) { $("ag-msg").textContent = err.message; }
+  } catch (err) { toast(err.message, "bad"); }
 }
-
-// ---------------- Config ----------------
-let cfgPath = "";
-let catalogCache = null;
-
-function loadConfigView() {
-  populateCatalog();
-  if (!$("cfg-text").value) loadConfig();
-}
-
-async function ensureCatalog() {
-  if (catalogCache) return catalogCache;
-  try { catalogCache = await api("/api/vendor-catalog"); }
-  catch { catalogCache = []; }
-  return catalogCache;
-}
-
-async function populateCatalog() {
-  const cat = await ensureCatalog();
-  const vs = $("qa-vendor");
-  const keepV = vs.value;
-  vs.innerHTML = `<option value="">${t("qa.pickv")}</option>` + cat.map(v =>
-    `<option value="${esc(v.id)}">${esc(lang === "zh" ? v.name_zh : v.name_en)}</option>`).join("");
-  if (keepV && cat.some(v => v.id === keepV)) vs.value = keepV;
-  await populatePlans();
-}
-async function populatePlans() {
-  const cat = await ensureCatalog();
-  const vs = $("qa-vendor"), ps = $("qa-plan");
-  const keepP = ps.value;
-  const vendor = cat.find(v => v.id === vs.value);
-  if (!vendor) { ps.innerHTML = `<option value="">${t("qa.pickp")}</option>`; ps.disabled = true; return; }
-  ps.disabled = false;
-  if (vendor.plans.length === 1) {
-    const p = vendor.plans[0];
-    ps.innerHTML = `<option value="${esc(p.id)}" selected>${esc(lang === "zh" ? p.label_zh : p.label_en)}</option>`;
-  } else {
-    ps.innerHTML = `<option value="">${t("qa.pickp")}</option>` + vendor.plans.map(p =>
-      `<option value="${esc(p.id)}">${esc(lang === "zh" ? p.label_zh : p.label_en)}</option>`).join("");
-    if (vendor.plans.some(p => p.id === keepP)) ps.value = keepP;
-  }
-}
-
-async function addProvider() {
-  const vendor = $("qa-vendor").value, plan = $("qa-plan").value;
-  const key = $("qa-key").value.trim();
-  if (!vendor) { $("qa-msg").textContent = L("请选择厂商", "Pick a vendor first"); return; }
-  if (!plan) { $("qa-msg").textContent = L("请选择套餐", "Pick a plan"); return; }
-  if (!key) { $("qa-msg").textContent = L("请输入 API Key", "Paste an API key first"); return; }
-  $("qa-msg").textContent = L("添加中 …", "Adding …");
-  try {
-    const r = await post("/_admin/provider", { vendor, plan, api_key: key });
-    $("qa-msg").textContent = L(`已添加 provider ${r.provider}（${r.models ?? 0} 个模型），Key 已写入 env（${r.api_key_env}）并热重载生效`,
-      `Provider ${r.provider} added (${r.models ?? 0} models); key saved to env (${r.api_key_env}) and hot-reloaded`)
-      + (r.warnings && r.warnings.length ? L("；", "; ") + r.warnings.join("；") : "");
-    $("qa-key").value = "";
-    loadConfig();
-  } catch (err) { $("qa-msg").textContent = L("失败：", "Failed: ") + err.message; }
-}
-
-async function loadConfig() {
-  $("cfg-msg").textContent = L("读取中 …", "Loading …");
+</script>
+<script>
+"use strict";
+// ---------------- settings ----------------
+async function loadSettings() {
   try {
     const j = await api("/api/config");
-    cfgPath = j.path;
+    state.gw = j.gateway; renderPills();
+    $("gw-addr").value = j.gateway.addr;
+    $("gw-uiaddr").value = j.gateway.ui_addr;
+    $("gw-retain").value = j.gateway.log_retain_days;
+    $("gw-expose").checked = !!j.gateway.expose_groups_as_models;
     $("cfg-text").value = j.text;
-    $("cfg-msg").textContent = L("当前配置：", "Current config: ") + j.path;
-  } catch (err) { $("cfg-msg").textContent = err.message; }
+    $("cfg-path").textContent = j.path;
+  } catch (err) { toast(err.message, "bad"); }
+}
+async function saveGateway() {
+  const body = {
+    addr: $("gw-addr").value.trim(),
+    ui_addr: $("gw-uiaddr").value.trim(),
+    log_retain_days: +$("gw-retain").value || 0,
+    expose_groups_as_models: $("gw-expose").checked,
+  };
+  try {
+    const r = await post("/_admin/gateway", body);
+    (r.warnings || []).forEach(w => toast(w, "warn"));
+    if (r.addr_changed) toast(L("已保存。监听地址变更需重启进程后生效。", "Saved. Listen address changes take effect after a process restart."), "warn");
+    else toast(L("已保存并热重载", "Saved & hot-reloaded"), "ok");
+    loadSettings();
+  } catch (err) { toast(err.message, "bad"); }
+}
+function download(name, data, isText) {
+  let blob;
+  if (isText) blob = new Blob([data], { type: "text/plain" });
+  else {
+    const bin = atob(data.trim());
+    const u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    blob = new Blob([u]);
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+async function exportBackup() {
+  const pw = $("bk-exp-pw").value;
+  if (!pw) return toast(L("请先设置备份密码", "Choose a backup password first"), "warn");
+  try {
+    const r = await post("/_admin/export-enc", { password: pw });
+    download(r.filename, r.data_b64, false);
+    $("bk-exp-pw").value = "";
+    toast(L("备份已导出（含全部 Key，已加密）：", "Encrypted backup exported (includes all keys): ") + r.filename, "ok");
+  } catch (err) { toast(err.message, "bad"); }
+}
+async function importBackup() {
+  const f = $("bk-imp-file").files[0];
+  const pw = $("bk-imp-pw").value;
+  if (!f) return toast(L("请先选择 .aback 备份文件", "Pick a .aback backup file first"), "warn");
+  if (!pw) return toast(L("请输入备份密码", "Enter the backup password"), "warn");
+  const data = (await f.text()).trim();
+  if (!await confirmM(t("st.importB"),
+    L(`导入将整份替换当前 config.yaml（自动 .bak 备份）并合并 ${f.name} 中的 env 键，随后热重载。确定？`,
+      `Import replaces config.yaml (auto .bak) and merges the env keys from ${f.name}, then hot-reloads. Proceed?`))) return;
+  try {
+    const r = await post("/_admin/import-enc", { password: pw, data_b64: data });
+    $("bk-imp-pw").value = ""; $("bk-imp-file").value = "";
+    (r.warnings || []).forEach(w => toast(w, "warn"));
+    toast(L("导入成功，已合并 ", "Imported, merged ") + (r.env_keys ?? 0) + L(" 个 env 键并热重载", " env keys, hot-reloaded"), "ok");
+    if (r.addr_changed) toast(L("监听地址有变化，需重启进程生效。", "Listen addresses changed — restart the process to apply."), "warn");
+    loadSettings();
+  } catch (err) { toast(err.message, "bad"); }
+}
+async function loadConfig() {
+  try {
+    const j = await api("/api/config");
+    $("cfg-text").value = j.text; $("cfg-path").textContent = j.path;
+  } catch (err) { toast(err.message, "bad"); }
 }
 async function saveConfig() {
-  const text = $("cfg-text").value;
-  if (!text.trim()) { $("cfg-msg").textContent = L("配置为空，已忽略", "Config is empty, ignored"); return; }
-  $("cfg-msg").textContent = L("校验并应用中 …", "Validating & applying …");
   try {
-    const r = await post("/_admin/config", { text });
-    $("cfg-msg").textContent = L("已保存并热重载生效", "Saved and hot-reloaded")
-      + (r.addr_changed ? L("（注意：监听地址变更需重启进程）", " (note: listening address changed, restart required)") : "")
-      + (r.warnings && r.warnings.length ? L("；警告：", "; warnings: ") + r.warnings.join("；") : "");
-  } catch (err) { $("cfg-msg").textContent = L("失败：", "Failed: ") + err.message; }
+    const r = await post("/_admin/config", { text: $("cfg-text").value });
+    (r.warnings || []).forEach(w => toast(w, "warn"));
+    toast(L("配置已校验、保存并热重载", "Config validated, saved & hot-reloaded"), "ok");
+    loadSettings();
+  } catch (err) { toast(err.message, "bad"); }
 }
-function exportConfig() {
-  const text = $("cfg-text").value;
-  if (!text.trim()) { $("cfg-msg").textContent = L("先读取或粘贴配置再导出", "Load or paste a config before exporting"); return; }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type: "application/x-yaml" }));
-  a.download = "agentbuffet-config.yaml";
-  a.click();
-  URL.revokeObjectURL(a.href);
-  $("cfg-msg").textContent = L("已导出 agentbuffet-config.yaml", "Exported agentbuffet-config.yaml");
+function exportYaml() {
+  if (!$("cfg-text").value) return toast(L("请先读取配置", "Load the config first"), "warn");
+  download("agentbuffet-config.yaml", $("cfg-text").value, true);
 }
 async function copyConfig() {
-  try { await navigator.clipboard.writeText($("cfg-text").value); $("cfg-msg").textContent = L("已复制到剪贴板", "Copied to clipboard"); }
-  catch { $("cfg-msg").textContent = L("复制失败，请手动全选复制", "Copy failed, select all manually"); }
+  try { await navigator.clipboard.writeText($("cfg-text").value); toast(t("st.copied"), "ok"); }
+  catch (e) { toast(L("复制失败，请手动选择", "Copy failed, select manually"), "bad"); }
 }
 
-applyLang();
-loadOverview();
+// ---------------- init ----------------
+(async function init() {
+  try { state.gw = (await api("/api/config")).gateway; } catch (e) { /* loopback only */ }
+  applyLang();
+})();
 </script>
 </body>
 </html>

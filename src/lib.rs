@@ -100,7 +100,8 @@ async fn ui_index(ConnectInfo(peer): ConnectInfo<SocketAddr>) -> Response<Body> 
     if let Some(r) = guard(peer) {
         return r;
     }
-    let mut r = Response::new(Body::from(UI_HTML));
+    let html = UI_HTML.replace("__BUFFET_VERSION__", env!("CARGO_PKG_VERSION"));
+    let mut r = Response::new(Body::from(html));
     *r.status_mut() = StatusCode::OK;
     r.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -179,6 +180,10 @@ async fn providers_view(
             serde_json::json!({
                 "id": p.id,
                 "vendor": p.vendor,
+                "models": p.models,
+                "base_url": p.base_url,
+                "allow_private": p.allow_private,
+                "disabled": p.disabled,
                 "status": status,
                 "tokens_used": used,
                 "quota_daily": daily,
@@ -243,10 +248,18 @@ async fn agents_view(
     let snap = st.snap.read().await.clone();
     let targets = agent_targets(&snap);
     let list = onboard::status_all(&st.home, &targets);
-    json_response(
-        StatusCode::OK,
-        serde_json::to_value(&list).unwrap_or_else(|_| serde_json::json!([])),
-    )
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for s in list {
+        let mut v = serde_json::to_value(&s).unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(a) = snap.agents.get(&s.agent_id) {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("default_group".into(), serde_json::json!(a.default_group));
+                obj.insert("display_name".into(), serde_json::json!(a.display_name));
+            }
+        }
+        out.push(v);
+    }
+    json_response(StatusCode::OK, serde_json::Value::Array(out))
 }
 
 // ---------------------------------------------------------------- /api/agents 写操作
@@ -570,10 +583,21 @@ async fn config_get(
             "无配置文件路径，不支持导出".into(),
         );
     };
+    let snap = st.snap.read().await.clone();
+    let gw = serde_json::json!({
+        "addr": snap.gateway_addr.to_string(),
+        "ui_addr": snap.ui_addr.to_string(),
+        "log_retain_days": snap.raw.gateway.log_retain_days,
+        "expose_groups_as_models": snap.raw.gateway.expose_groups_as_models,
+    });
     match std::fs::read_to_string(path) {
         Ok(text) => json_response(
             StatusCode::OK,
-            serde_json::json!({"path": path.display().to_string(), "text": text}),
+            serde_json::json!({
+                "path": path.display().to_string(),
+                "text": text,
+                "gateway": gw,
+            }),
         ),
         Err(e) => err(
             StatusCode::UNPROCESSABLE_ENTITY,
