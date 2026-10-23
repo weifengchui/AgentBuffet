@@ -88,6 +88,9 @@ impl Adapter {
     }
 }
 
+/// 已知可检测的本机 Agent（接入器视图快速接入）。
+pub const KNOWN_AGENTS: &[&str] = &["opencode", "codex", "claude-code"];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentStatus {
     pub agent_id: String,

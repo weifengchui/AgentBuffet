@@ -144,8 +144,8 @@ label.ck input { width: auto; accent-color: var(--accent); }
 #modal-x:hover { color: var(--text); background: var(--card2); }
 #modal-body { padding: 16px 18px; max-height: 66vh; overflow-y: auto; }
 #modal-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
-#toasts { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex;
-  flex-direction: column; gap: 8px; max-width: 420px; }
+#toasts { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 200;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; max-width: min(92vw, 620px); }
 .toast { background: var(--card); border: 1px solid #263041; border-left-width: 3px; border-radius: 10px;
   padding: 10px 14px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
   animation: slidein .18s ease-out; word-break: break-all; }
@@ -153,7 +153,7 @@ label.ck input { width: auto; accent-color: var(--accent); }
 .toast.bad { border-left-color: var(--off); }
 .toast.warn { border-left-color: var(--warn); }
 .toast.info { border-left-color: var(--accent); }
-@keyframes slidein { from { transform: translateX(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slidein { from { transform: translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
 details.adv { border: 1px solid var(--line); border-radius: 12px; background: var(--card); margin-bottom: 16px; }
 details.adv > summary { cursor: pointer; padding: 13px 18px; color: var(--dim2); font-weight: 500; }
 details.adv > summary:hover { color: var(--text); }
@@ -233,6 +233,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
           <button class="btn primary" onclick="openAgent()">＋ <span data-i18n="ag.add"></span></button>
           <button class="btn ghost sm" onclick="loadAgents()" data-i18n="common.refresh"></button>
           <span class="muted" data-i18n="ag.hint"></span>
+        </div>
+        <div class="panel" id="ag-detect" style="display:none">
+          <h3 data-i18n="ag.detect"></h3>
+          <div class="muted" data-i18n="ag.detectHint"></div>
+          <div id="ag-det-list" style="margin-top:10px"></div>
         </div>
         <div class="panel" style="padding:4px 10px;overflow-x:auto">
           <table><thead><tr>
@@ -322,6 +327,7 @@ const I18N = {
     "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
     "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
     "ag.adapter": "适配器", "ag.defgroup": "默认组",
+    "ag.detect": "本机 Agent 检测", "ag.detectHint": "自动识别本机已安装的编程 Agent，一键接入网关",
     "st.gateway": "网关", "st.gatewayHint": "监听地址修改后需重启进程才会生效",
     "st.addr": "网关监听地址（API）", "st.uiAddr": "控制台监听地址（UI）",
     "st.retain": "日志保留天数", "st.expose": "将路由组暴露为 group/ 虚拟模型",
@@ -347,6 +353,7 @@ const I18N = {
     "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
     "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
     "ag.adapter": "Adapter", "ag.defgroup": "Default group",
+    "ag.detect": "Detected local agents", "ag.detectHint": "Coding tools found on this machine, attach in one click",
     "st.gateway": "Gateway", "st.gatewayHint": "Changing listen addresses requires a process restart",
     "st.addr": "Gateway listen address (API)", "st.uiAddr": "Console listen address (UI)",
     "st.retain": "Log retention days", "st.expose": "Expose routing groups as group/ virtual models",
@@ -501,11 +508,12 @@ async function loadProviders() {
       return `<div class="pcard">
         <div class="pc-top"><span class="chip">${esc(p.vendor)}</span>
           <span class="pill ${STP[p.status] || "dim"}"><i></i>${esc(stLabel(p.status))}</span>
-          <span style="margin-left:auto" class="muted">${models} ${esc(L("模型", "models"))}</span></div>
+          <span style="margin-left:auto" class="muted">${models} ${esc(L("模型", "models"))}${p.key_count ? ` · 🔑×${p.key_count}` : ""}</span></div>
         <div class="pc-id">${esc(p.id)}</div>
         ${quota}${fail}${open}
         <div class="pc-ops">
           <button class="btn sm" onclick="testProvider('${esc(p.id)}',this)">${esc(L("测试", "Test"))}</button>
+          <button class="btn sm ghost" onclick="openKeys('${esc(p.id)}')">${esc(L("密钥", "Keys"))}</button>
           <button class="btn sm ghost" onclick="openEdit('${esc(p.id)}')">${esc(L("编辑", "Edit"))}</button>
           <button class="btn sm ghost" onclick="toggleDisabled('${esc(p.id)}')">${p.disabled || p.status === "disabled" ? esc(L("启用", "Enable")) : esc(L("停用", "Disable"))}</button>
           <button class="btn sm danger" onclick="delProvider('${esc(p.id)}')">${esc(L("删除", "Delete"))}</button>
@@ -529,7 +537,8 @@ async function openAddWizard() {
       <select id="wz-vendor">${vs.map((v, i) => `<option value="${i}">${esc(vn(v))}</option>`).join("")}</select></label>
     <label class="f"><span>${esc(L("套餐 / 接入方式", "Plan"))}</span><select id="wz-plan"></select></label>
     <div class="muted" id="wz-info" style="margin:-4px 0 12px"></div>
-    <label class="f"><span>API Key</span><input id="wz-key" type="password" autocomplete="off" placeholder="${esc(L("粘贴 API Key", "Paste API key"))}"></label>
+    <label class="f"><span>API Key <span class="muted">${esc(L("（逗号分隔可粘贴多个）", "(comma-separated for multiple)"))}</span></span>
+      <input id="wz-key" type="password" autocomplete="off" placeholder="${esc(L("粘贴 API Key", "Paste API key"))}"></label>
     <div class="muted">${esc(L("Key 只写入本机 env 文件（0600），不会进入 config.yaml。", "The key is stored only in the local env file (0600), never in config.yaml."))}</div>`,
     `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
      <button class="btn primary" id="wz-ok">${esc(L("添加", "Add"))}</button>`);
@@ -572,7 +581,7 @@ async function openEdit(id) {
     <div class="grid2">
       <label class="f"><span>${esc(L("每日额度（tokens，0 表示不修改）", "Daily quota (tokens, 0 = keep)"))}</span>
         <input id="ed-quota" type="number" min="0" placeholder="${p.quota_daily ?? 0}"></label>
-      <label class="f"><span>${esc(L("更换 API Key（留空不变）", "New API key (empty = keep)"))}</span>
+      <label class="f"><span>${esc(L("整体替换 Key（留空不变，逗号分隔多个）", "Replace keys (empty = keep, comma-separated)"))}</span>
         <input id="ed-key" type="password" autocomplete="off"></label>
     </div>
     <label class="f"><span>${esc(L("模型列表（每行一个）", "Models (one per line)"))}</span>
@@ -598,6 +607,48 @@ async function openEdit(id) {
       closeModal(); toast(L("已保存并热重载", "Saved & hot-reloaded"), "ok"); loadProviders();
     } catch (err) { toast(err.message, "bad"); $("ed-ok").disabled = false; }
   };
+}
+
+async function openKeys(id) {
+  const p0 = state.providers.find(x => x.id === id);
+  if (!p0) return;
+  const body = () => {
+    const q = state.providers.find(x => x.id === id) || p0;
+    const hints = q.key_hints || [];
+    return `
+    <div class="muted" style="margin-bottom:10px">${esc(L("环境变量", "Env var"))} <code>${esc(q.api_key_env || "")}</code> · ${esc(L("请求按轮转分摊到各 Key；某个 Key 鉴权失败会自动换下一个，全部失败才转移其他服务商", "Requests rotate across keys; an auth failure switches to the next key, failover only when all fail"))}</div>
+    ${hints.length ? hints.map((h, i) => `<div class="mrow"><span class="chip">#${i + 1}</span><code>${esc(h)}</code>
+      <button class="btn sm danger" style="margin-left:auto" onclick="removeKey('${esc(id)}',${i})">✕ ${esc(L("删除", "Remove"))}</button></div>`).join("")
+      : `<div class="muted" style="margin-bottom:8px">${esc(L("当前没有可用 Key（服务商将处于降级状态）", "No keys configured (provider is degraded)"))}</div>`}
+    <div class="mrow" style="margin-top:8px"><input id="kk-new" type="password" autocomplete="off" placeholder="${esc(L("粘贴新 Key", "Paste new key"))}" style="flex:1">
+      <button class="btn" id="kk-add">${esc(L("添加", "Add"))}</button></div>`;
+  };
+  openModal(L("密钥管理", "API keys") + " · " + id, body(),
+    `<button class="btn ghost" onclick="closeModal()">${esc(L("关闭", "Close"))}</button>`);
+  const refresh = async () => {
+    state.providers = await api("/api/providers");
+    $("modal-body").innerHTML = body();
+    $("kk-add").onclick = () => addKey(id);
+    loadProviders();
+  };
+  window.__kkRefresh = refresh;
+  $("kk-add").onclick = () => addKey(id);
+}
+async function addKey(id) {
+  const k = $("kk-new").value.trim();
+  if (!k) return toast(L("请输入 Key", "Paste a key first"), "warn");
+  try {
+    const r = await post("/_admin/provider/keys", { id, action: "add", key: k });
+    toast(L("已添加，当前共 ", "Added, now ") + r.key_count + L(" 个 Key（即时生效）", " keys (live)"), "ok");
+    if (window.__kkRefresh) await window.__kkRefresh();
+  } catch (err) { toast(err.message, "bad"); }
+}
+async function removeKey(id, i) {
+  try {
+    const r = await post("/_admin/provider/keys", { id, action: "remove", index: i });
+    toast(L("已删除该 Key，剩余 ", "Key removed, ") + r.key_count + L(" 个", " left"), "ok");
+    if (window.__kkRefresh) await window.__kkRefresh();
+  } catch (err) { toast(err.message, "bad"); }
 }
 
 async function delProvider(id) {
@@ -738,6 +789,7 @@ async function delGroup(name) {
 async function loadAgents() {
   try {
     state.agents = await api("/api/agents");
+    loadDetect();
     if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
     const rows = state.agents;
     $("ag-rows").innerHTML = rows.map(a => {
@@ -758,6 +810,38 @@ async function loadAgents() {
       || `<tr><td colspan="5"><div class="empty"><div class="big">🤖</div><b>${esc(L("还没有 Agent", "No agents yet"))}</b>${esc(L("Agent 是接入网关的编程助手（opencode / codex / hermes …），新增后一键改写其本地配置", "An agent is a coding tool routed through the gateway. Add one, then attach it in a click"))}</div></td></tr>`;
   } catch (err) { toast(err.message, "bad"); }
 }
+async function loadDetect() {
+  try {
+    const list = await api("/api/agents/detect");
+    const fresh = list.filter(d => !d.in_config);
+    $("ag-detect").style.display = fresh.length ? "" : "none";
+    $("ag-det-list").innerHTML = fresh.map(d => {
+      const canAttach = d.installed && (d.adapter === "opencode" || d.adapter === "codex");
+      const stx = d.installed
+        ? `<span class="pill on"><i></i>${esc(L("已检测到", "detected"))}</span>`
+        : `<span class="pill dim"><i></i>${esc(L("未安装", "not installed"))}</span>`;
+      return `<div class="mrow"><span class="chip">${esc(d.adapter)}</span><b>${esc(d.agent_id)}</b>${stx}
+        <span class="muted" style="flex:1;min-width:120px;word-break:break-all">${esc(d.config_path || "")}${d.note ? " · " + esc(d.note) : ""}</span>
+        ${canAttach ? `<button class="btn sm primary" onclick="quickAttach('${esc(d.agent_id)}')">${esc(L("快速接入", "Quick attach"))}</button>` : ""}</div>`;
+    }).join("");
+    document.querySelectorAll("#ag-detect [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+  } catch (e) { /* 检测失败不打扰主列表 */ }
+}
+async function quickAttach(id) {
+  if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
+  if (!state.groups.length) return toast(L("请先在「路由」创建至少一个路由组", "Create a routing group first"), "warn");
+  const g = state.groups[0].name;
+  if (!await confirmM(L("快速接入", "Quick attach"),
+    L(`将创建 Agent ${id}（默认组 ${g}）并改写其本地配置：写入前自动备份，真实 Key 留在网关。确定？`,
+      `Creates agent ${id} (default group ${g}) and rewrites its local config: backed up first, real keys stay in the gateway. Proceed?`))) return;
+  try {
+    await post("/_admin/agent", { id, default_group: g });
+    const r = await post("/api/agents/attach", { agent_id: id, group: g });
+    toast(L("已接入 ", "Attached ") + id + (r.note ? " · " + r.note : ""), "ok");
+  } catch (err) { toast(err.message, "bad"); }
+  loadAgents();
+}
+
 async function openAgent(id) {
   if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
   if (!state.groups.length) return toast(L("请先创建路由组", "Create a routing group first"), "warn");

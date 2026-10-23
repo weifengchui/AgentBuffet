@@ -179,6 +179,16 @@ struct Outbound {
     body: Vec<u8>,
 }
 
+static KEY_RR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// env 值 → Key 列表：逗号分隔、去空白、过滤空项（单 Key 与历史行为一致）。
+pub fn split_keys(v: &str) -> Vec<String> {
+    v.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// 主转发入口：候选循环故障转移。
 pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
     let t0 = Instant::now();
@@ -367,87 +377,102 @@ async fn attempt_once(
 ) -> Result<(Response<Body>, RespMeta), AttemptFail> {
     let fo = &snap.raw.failover;
 
-    // 鉴权：从环境变量取 key，替换 Authorization；缺失按 degraded 处理
-    let api_key = match std::env::var(&p.api_key_env) {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            return Err(AttemptFail {
-                tag: "nokey".into(),
-                kind: FailKind::Degraded,
-                last: (
-                    502,
-                    format!("provider {} 的 {} 未设置（degraded）", p.id, p.api_key_env),
-                ),
-            })
-        }
-    };
-    let mut hdrs = ob.headers;
-    match HeaderValue::from_maybe_shared(format!("Bearer {api_key}").into_bytes()) {
-        Ok(v) => {
-            hdrs.insert(header::AUTHORIZATION, v);
-        }
-        Err(_) => {
-            return Err(AttemptFail {
-                tag: "badkey".into(),
-                kind: FailKind::Degraded,
-                last: (502, format!("provider {} 的 key 含非法字符", p.id)),
-            })
-        }
+    // 鉴权：env 值支持逗号分隔多 Key。轮转起点全局自增分摊负载；401/403 时换下一个
+    // Key 重试，全部 Key 都鉴权失败才按 degraded 切换下一候选；缺失 Key 仍按 degraded。
+    let keys: Vec<String> = std::env::var(&p.api_key_env)
+        .map(|v| split_keys(&v))
+        .unwrap_or_default();
+    if keys.is_empty() {
+        return Err(AttemptFail {
+            tag: "nokey".into(),
+            kind: FailKind::Degraded,
+            last: (
+                502,
+                format!("provider {} 的 {} 未设置（degraded）", p.id, p.api_key_env),
+            ),
+        });
     }
-
-    let rb = state
-        .client
-        .request(ob.method, &ob.url)
-        .headers(hdrs)
-        .body(ob.body);
-
+    let n = keys.len();
+    let start = if n > 1 {
+        (KEY_RR.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as usize) % n
+    } else {
+        0
+    };
     let fb = Duration::from_secs(fo.timeouts.first_byte_seconds);
-    let resp = match tokio::time::timeout(fb, rb.send()).await {
-        Err(_) => {
-            let msg = format!("上游 {} 首字节超时", p.id);
-            if fo.retry_on_timeout {
-                return Err(AttemptFail {
-                    tag: "timeout".into(),
-                    kind: FailKind::Circuit,
-                    last: (504, msg),
-                });
+    let mut k = 0usize;
+    let resp = loop {
+        let idx = (start + k) % n;
+        let mut hdrs = ob.headers.clone();
+        match HeaderValue::from_maybe_shared(format!("Bearer {}", keys[idx]).into_bytes()) {
+            Ok(v) => {
+                hdrs.insert(header::AUTHORIZATION, v);
             }
-            let mut r = json_error(504, &msg);
-            attach_chain(&mut r, &chain_line(chain, &p.id, "timeout"));
-            return Ok((
-                r,
-                RespMeta {
-                    status: 504,
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    streamed: false,
-                    chain_entry: "timeout".into(),
-                },
-            ));
-        }
-        Ok(Err(e)) => {
-            let msg = format!("上游请求失败: {e}");
-            if fo.retry_on_timeout {
+            Err(_) => {
                 return Err(AttemptFail {
-                    tag: "conn".into(),
-                    kind: FailKind::Circuit,
-                    last: (502, msg),
-                });
+                    tag: "badkey".into(),
+                    kind: FailKind::Degraded,
+                    last: (502, format!("provider {} 的 key 含非法字符", p.id)),
+                })
             }
-            let mut r = json_error(502, &msg);
-            attach_chain(&mut r, &chain_line(chain, &p.id, "conn"));
-            return Ok((
-                r,
-                RespMeta {
-                    status: 502,
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    streamed: false,
-                    chain_entry: "conn".into(),
-                },
-            ));
         }
-        Ok(Ok(r)) => r,
+        let rb = state
+            .client
+            .request(ob.method.clone(), &ob.url)
+            .headers(hdrs)
+            .body(ob.body.clone());
+        let r = match tokio::time::timeout(fb, rb.send()).await {
+            Err(_) => {
+                let msg = format!("上游 {} 首字节超时", p.id);
+                if fo.retry_on_timeout {
+                    return Err(AttemptFail {
+                        tag: "timeout".into(),
+                        kind: FailKind::Circuit,
+                        last: (504, msg),
+                    });
+                }
+                let mut r = json_error(504, &msg);
+                attach_chain(&mut r, &chain_line(chain, &p.id, "timeout"));
+                return Ok((
+                    r,
+                    RespMeta {
+                        status: 504,
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        streamed: false,
+                        chain_entry: "timeout".into(),
+                    },
+                ));
+            }
+            Ok(Err(e)) => {
+                let msg = format!("上游请求失败: {e}");
+                if fo.retry_on_timeout {
+                    return Err(AttemptFail {
+                        tag: "conn".into(),
+                        kind: FailKind::Circuit,
+                        last: (502, msg),
+                    });
+                }
+                let mut r = json_error(502, &msg);
+                attach_chain(&mut r, &chain_line(chain, &p.id, "conn"));
+                return Ok((
+                    r,
+                    RespMeta {
+                        status: 502,
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        streamed: false,
+                        chain_entry: "conn".into(),
+                    },
+                ));
+            }
+            Ok(Ok(r)) => r,
+        };
+        let sc = r.status().as_u16();
+        if (sc == 401 || sc == 403) && k + 1 < n {
+            k += 1;
+            continue; // 该 Key 鉴权失败且还有备用 Key：换下一个 Key 重试
+        }
+        break r;
     };
 
     let status = resp.status();
@@ -513,7 +538,10 @@ async fn attempt_once(
             kind: FailKind::Degraded,
             last: (
                 code,
-                format!("上游 {} 鉴权失败（{code}），已标记 degraded", p.id),
+                format!(
+                    "上游 {} 鉴权失败（{code}，共 {n} 个 Key），已标记 degraded",
+                    p.id
+                ),
             ),
         });
     }

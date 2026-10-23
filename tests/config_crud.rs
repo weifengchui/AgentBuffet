@@ -282,3 +282,102 @@ async fn enc_export_import_roundtrip() {
     let env = std::fs::read_to_string(dir.join("env")).unwrap();
     assert!(env.contains("K1=secret-value"), "{env}");
 }
+
+async fn call_get(st: Arc<AppState>, uri: &str) -> (StatusCode, serde_json::Value) {
+    let app = agentbuffet::build_admin_router(st);
+    let req = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .extension(ConnectInfo(SocketAddr::from((LB, 53))))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let code = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 22)
+        .await
+        .unwrap();
+    (
+        code,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn provider_keys_add_remove() {
+    std::env::set_var("K1", "secret-value");
+    let (st, dir) = state_for("keys");
+    // add：追加到逗号分隔值末尾
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "/_admin/provider/keys",
+        serde_json::json!({"id": "p1", "action": "add", "key": "second-key"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(j["key_count"], 2);
+    let env = std::fs::read_to_string(dir.join("env")).unwrap();
+    assert!(env.contains("K1=secret-value,second-key"), "{env}");
+    // remove index 0
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "/_admin/provider/keys",
+        serde_json::json!({"id": "p1", "action": "remove", "index": 0}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(j["key_count"], 1);
+    assert!(std::fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("K1=second-key"));
+    // 非法输入：含逗号 / 未知 provider / index 越界 / 未知 action
+    for (body, want) in [
+        (
+            serde_json::json!({"id": "p1", "action": "add", "key": "a,b"}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            serde_json::json!({"id": "nope", "action": "add", "key": "x"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            serde_json::json!({"id": "p1", "action": "remove", "index": 9}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            serde_json::json!({"id": "p1", "action": "clear"}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let (code, _) = call(st.clone(), LB, "/_admin/provider/keys", body).await;
+        assert_eq!(code, want);
+    }
+    // 非 loopback 一律 403
+    let (code, _) = call(
+        st,
+        [10, 0, 0, 1],
+        "/_admin/provider/keys",
+        serde_json::json!({"id": "p1", "action": "add", "key": "x"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn agents_detect_finds_installed() {
+    let (st, dir) = state_for("det");
+    std::fs::create_dir_all(dir.join(".codex")).unwrap();
+    std::fs::write(dir.join(".codex").join("config.toml"), "model = \"gpt\"\n").unwrap();
+    let (code, j) = call_get(st.clone(), "/api/agents/detect").await;
+    assert_eq!(code, StatusCode::OK);
+    let arr = j.as_array().unwrap();
+    assert_eq!(arr.len(), 3);
+    let codex = arr.iter().find(|x| x["agent_id"] == "codex").unwrap();
+    assert_eq!(codex["installed"], true);
+    assert_eq!(codex["in_config"], false);
+    let oc = arr.iter().find(|x| x["agent_id"] == "opencode").unwrap();
+    assert_eq!(oc["installed"], false);
+    let cc = arr.iter().find(|x| x["agent_id"] == "claude-code").unwrap();
+    assert_eq!(cc["adapter"], "claude-code");
+}

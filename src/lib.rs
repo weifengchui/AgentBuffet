@@ -43,12 +43,14 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
         .route("/api/providers", get(providers_view))
         .route("/api/routing", get(routing_view))
         .route("/api/agents", get(agents_view))
+        .route("/api/agents/detect", get(agents_detect))
         .route("/api/config", get(config_get))
         .route("/api/vendor-catalog", get(vendor_catalog))
         .route("/_admin/config", post(config_import))
         .route("/_admin/provider", post(provider_add))
         .route("/_admin/provider/edit", post(provider_edit))
         .route("/_admin/provider/delete", post(provider_delete))
+        .route("/_admin/provider/keys", post(provider_keys))
         .route("/_admin/group", post(group_upsert))
         .route("/_admin/group/delete", post(group_delete))
         .route("/_admin/agent", post(agent_upsert))
@@ -177,9 +179,25 @@ async fn providers_view(
             } else {
                 "ok"
             };
+            let keys: Vec<String> = std::env::var(&p.api_key_env)
+                .map(|v| crate::proxy::split_keys(&v))
+                .unwrap_or_default();
+            let key_hints: Vec<String> = keys
+                .iter()
+                .map(|k| {
+                    let tail: String = k
+                        .chars()
+                        .skip(k.chars().count().saturating_sub(4))
+                        .collect();
+                    format!("****{tail}")
+                })
+                .collect();
             serde_json::json!({
                 "id": p.id,
                 "vendor": p.vendor,
+                "api_key_env": p.api_key_env,
+                "key_count": keys.len(),
+                "key_hints": key_hints,
                 "models": p.models,
                 "base_url": p.base_url,
                 "allow_private": p.allow_private,
@@ -732,7 +750,8 @@ async fn provider_add(
             "无配置文件路径，不支持添加 provider".into(),
         );
     };
-    if body.api_key.trim().is_empty() {
+    let api_keys = proxy::split_keys(body.api_key.trim());
+    if api_keys.is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "API Key 不能为空".into());
     }
     let Some((pid, plan)) = vendors::lookup(&body.vendor, &body.plan) else {
@@ -749,7 +768,7 @@ async fn provider_add(
         let url = format!("{}/models", plan.base_url.trim_end_matches('/'));
         let sent = tokio::time::timeout(
             Duration::from_secs(5),
-            st.client.get(&url).bearer_auth(body.api_key.trim()).send(),
+            st.client.get(&url).bearer_auth(&api_keys[0]).send(),
         )
         .await;
         match sent {
@@ -869,13 +888,13 @@ async fn provider_add(
             format!("写入配置失败: {e}"),
         );
     }
-    if let Err(e) = write_env_key(&st.env_file, &env_name, body.api_key.trim()) {
+    if let Err(e) = write_env_key(&st.env_file, &env_name, &api_keys.join(",")) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("写入 {} 失败: {e}", st.env_file.display()),
         );
     }
-    std::env::set_var(&env_name, body.api_key.trim());
+    std::env::set_var(&env_name, api_keys.join(","));
     let (code, mut payload) = do_reload(&st).await;
     if let Some(obj) = payload.as_object_mut() {
         obj.insert("provider".into(), serde_json::json!(pid));
@@ -1082,13 +1101,14 @@ async fn provider_edit(
                     .map(|p| p.api_key_env.clone())
                     .unwrap_or_else(|| vendors::env_name(&id2))
             };
-            if let Err(e) = write_env_key(&st.env_file, &env_name, key.trim()) {
+            let val = proxy::split_keys(key.trim()).join(",");
+            if let Err(e) = write_env_key(&st.env_file, &env_name, &val) {
                 return json_response(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     serde_json::json!({"error": format!("写入 env 失败: {e}")}),
                 );
             }
-            std::env::set_var(&env_name, key.trim());
+            std::env::set_var(&env_name, &val);
         }
     }
     json_response(code, payload)
@@ -1416,6 +1436,117 @@ async fn gateway_edit(
     json_response(code, payload)
 }
 
+#[derive(Debug, Deserialize)]
+struct ProviderKeysReq {
+    id: String,
+    /// add | remove
+    action: String,
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    index: Option<usize>,
+}
+
+/// 多 Key 管理：直接操作 env 值（逗号分隔），即时生效，不改 config.yaml。
+async fn provider_keys(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<ProviderKeysReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let err =
+        |code: StatusCode, msg: String| json_response(code, serde_json::json!({"error": msg}));
+    let env_name = {
+        let snap = st.snap.read().await;
+        match snap.providers.get(&body.id) {
+            Some(p) => p.api_key_env.clone(),
+            None => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    serde_json::json!({"error": format!("provider 不存在: {}", body.id)}),
+                )
+            }
+        }
+    };
+    let raw = std::env::var(&env_name).unwrap_or_default();
+    let mut keys = proxy::split_keys(&raw);
+    match body.action.as_str() {
+        "add" => {
+            let k = body.key.unwrap_or_default();
+            let k = k.trim().to_string();
+            if k.is_empty() {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "Key 不能为空".into());
+            }
+            if k.contains(',') {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "单个 Key 不得含逗号".into(),
+                );
+            }
+            if keys.iter().any(|x| x == &k) {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "该 Key 已存在".into());
+            }
+            keys.push(k);
+        }
+        "remove" => {
+            let Some(i) = body.index else {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "缺少 index".into());
+            };
+            if i >= keys.len() {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "index 越界".into());
+            }
+            keys.remove(i);
+        }
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "action 需为 add 或 remove".into(),
+            )
+        }
+    }
+    let val = keys.join(",");
+    if let Err(e) = write_env_key(&st.env_file, &env_name, &val) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("写入 env 失败: {e}"),
+        );
+    }
+    std::env::set_var(&env_name, &val);
+    json_response(StatusCode::OK, serde_json::json!({"key_count": keys.len()}))
+}
+
+/// 本机 Agent 检测（接入器快速接入）：逐个探测已知适配器的配置文件。
+async fn agents_detect(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let snap = st.snap.read().await.clone();
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for id in onboard::KNOWN_AGENTS {
+        let target = onboard::Target {
+            agent_id: (*id).to_string(),
+            default_group: String::new(),
+            groups: Vec::new(),
+            gateway_addr: snap.gateway_addr.to_string(),
+        };
+        let mut v = serde_json::to_value(onboard::detect(&st.home, &target))
+            .unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert(
+                "in_config".into(),
+                serde_json::json!(snap.agents.contains_key(*id)),
+            );
+        }
+        out.push(v);
+    }
+    json_response(StatusCode::OK, serde_json::Value::Array(out))
+}
+
 // ---------------------------------------------------------------- 加密备份
 
 fn read_env_pairs(path: &std::path::Path) -> Vec<(String, String)> {
@@ -1591,7 +1722,10 @@ async fn routing_test(
             serde_json::json!({"error": format!("provider 不存在: {}", body.provider)}),
         );
     };
-    let Ok(_key) = std::env::var(&p.api_key_env) else {
+    let _key = std::env::var(&p.api_key_env)
+        .map(|v| proxy::split_keys(&v).into_iter().next().unwrap_or_default())
+        .unwrap_or_default();
+    if _key.is_empty() {
         return json_response(
             StatusCode::OK,
             serde_json::json!({
@@ -1599,7 +1733,7 @@ async fn routing_test(
                 "error": format!("环境变量 {} 未设置", p.api_key_env),
             }),
         );
-    };
+    }
     let url = format!("{}/models", p.base_url.trim_end_matches('/'));
     let t0 = Instant::now();
     let sent = tokio::time::timeout(
