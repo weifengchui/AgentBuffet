@@ -241,12 +241,12 @@ async fn routing_view(
         return r;
     }
     let snap = st.snap.read().await.clone();
-    let mut names: Vec<&String> = snap.groups.keys().collect();
-    names.sort();
-    let groups: Vec<serde_json::Value> = names
-        .into_iter()
-        .map(|name| {
-            let g = &snap.groups[name];
+    let groups: Vec<serde_json::Value> = snap
+        .raw
+        .routing_groups
+        .iter()
+        .map(|g| {
+            let name = g.name.as_str();
             let members: Vec<serde_json::Value> = snap
                 .group_members(name)
                 .into_iter()
@@ -513,6 +513,8 @@ struct RoutingEdit {
     group: Option<String>,
     #[serde(default)]
     members: Option<Vec<MemberReq>>,
+    #[serde(default)]
+    order: Option<Vec<String>>,
 }
 
 fn yaml_str(v: &serde_yaml::Value, key: &str) -> Option<String> {
@@ -610,10 +612,41 @@ async fn routing_edit(
                 format!("路由组不存在: {group}"),
             );
         }
+    } else if let Some(order) = &body.order {
+        let seq = match doc
+            .get_mut("routing_groups")
+            .and_then(|v| v.as_sequence_mut())
+        {
+            Some(s) => s,
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "配置中无 routing_groups 段".into(),
+                )
+            }
+        };
+        let mut items: Vec<serde_yaml::Value> = std::mem::take(seq);
+        let mut out: Vec<serde_yaml::Value> = Vec::with_capacity(items.len());
+        for name in order {
+            match items
+                .iter()
+                .position(|it| yaml_str(it, "name").as_deref() == Some(name.as_str()))
+            {
+                Some(i) => out.push(items.remove(i)),
+                None => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!("路由组不存在: {name}"),
+                    )
+                }
+            }
+        }
+        out.extend(items);
+        *seq = out;
     } else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "body 需为 {provider, disabled} 或 {group, members:[{provider, model, priority}]}"
+            "body 需为 {provider, disabled} 或 {group, members:[{provider, model, priority}]} 或 {order:[组名,…]}"
                 .into(),
         );
     }

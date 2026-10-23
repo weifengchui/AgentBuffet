@@ -173,6 +173,8 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow .btn.ghost { flex: 0 0 auto; }
 .mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
+.gcard .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
+.gcard.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; }
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
 /* ---------------- starmap ---------------- */
 #ov-map { position: relative; height: 340px; border: 1px solid var(--line); border-radius: 10px; margin-top: 10px;
@@ -499,7 +501,6 @@ function renderPills() {
     const ok = state.providers.filter(x => x.status === "ok").length;
     p.push(`<span class="pill ${ok === state.providers.length ? "on" : "warn"}"><i></i>${ok}/${state.providers.length} ${esc(L("服务商", "providers"))}</span>`);
   }
-  if (state.totals) p.push(`<span class="pill dim"><i></i>${fmt(state.totals.requests)} ${esc(L("今日请求", "req today"))}</span>`);
   $("tb-pills").innerHTML = p.join("");
 }
 let curView = "overview";
@@ -867,9 +868,9 @@ async function loadRouting() {
     const j = await api("/api/routing");
     state.groups = j.groups || [];
     if (!state.providers.length) state.providers = await api("/api/providers");
-    $("rt-grid").innerHTML = state.groups.map(g => `
-      <div class="gcard">
-        <div class="g-top"><b>${esc(g.name)}</b><span class="chip">order</span>
+    $("rt-grid").innerHTML = state.groups.map((g, i) => `
+      <div class="gcard" data-name="${esc(g.name)}">
+        <div class="g-top"><span class="grip" draggable="true" title="${esc(L("拖动排序", "Drag to reorder"))}">⠿</span><b>${esc(g.name)}</b><span class="chip">#${i + 1}</span>
           <span class="muted">${g.members.length} ${esc(L("个成员", "members"))}</span>
           <div class="g-ops">
             <button class="btn sm ghost" onclick="openGroup('${esc(g.name)}')">${esc(L("编辑", "Edit"))}</button>
@@ -882,8 +883,36 @@ async function loadRouting() {
       </div>`).join("")
       || `<div class="empty"><div class="big">🧭</div><b>${esc(L("还没有路由组", "No routing groups yet"))}</b>${esc(L("路由组 = 一组「服务商 + 模型」的优先级列表，故障时自动转移", "A group is a prioritized list of provider/model pairs with automatic failover"))}</div>`;
     document.querySelectorAll("#rt-grid [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+    wireGroupDrag();
     return true;
   } catch (err) { toast(err.message, "bad"); return false; }
+}
+
+function wireGroupDrag() {
+  const grid = $("rt-grid"); if (!grid) return;
+  let dragEl = null;
+  grid.querySelectorAll(".grip").forEach(el => {
+    el.ondragstart = (e) => { dragEl = el.closest(".gcard"); e.dataTransfer.effectAllowed = "move"; };
+    el.ondragend = () => { dragEl = null; };
+  });
+  grid.querySelectorAll(".gcard").forEach(card => {
+    card.ondragover = (e) => { if (!dragEl) return; e.preventDefault(); card.classList.add("dragover"); };
+    card.ondragleave = () => card.classList.remove("dragover");
+    card.ondrop = async (e) => {
+      e.preventDefault(); card.classList.remove("dragover");
+      const from = dragEl; dragEl = null;
+      if (!from || from === card) return;
+      const names = [...grid.querySelectorAll(".gcard")].map(c => c.dataset.name);
+      const fi = names.indexOf(from.dataset.name), ti = names.indexOf(card.dataset.name);
+      if (fi < 0 || ti < 0) return;
+      names.splice(ti, 0, names.splice(fi, 1)[0]);
+      try {
+        await post("/_admin/routing", { order: names });
+        toast(L("顺序已保存并热重载", "Order saved & hot-reloaded"), "ok");
+      } catch (err) { toast(err.message, "bad"); }
+      loadRouting();
+    };
+  });
 }
 
 let gm = [];

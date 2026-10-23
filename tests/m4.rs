@@ -484,6 +484,69 @@ async fn routing_edit_writes_config_and_reloads() {
 }
 
 #[tokio::test]
+async fn routing_group_order_persists_and_views() {
+    let home = temp_dir("gorder-home");
+    let dir = temp_dir("gorder");
+    let cfg = dir.join("config.yaml");
+    // 追加一个名为 a2 的组：按配置顺序 g 在前，按字母序 a2 应在前，用于区分两种行为
+    let yaml = m4_config("http://127.0.0.1:1/v1", "http://127.0.0.1:2/v1").replace(
+        "\nagents:",
+        "\n  - name: a2\n    strategy: order\n    members:\n      - { provider: p2, model: m2, priority: 1 }\nagents:",
+    );
+    std::fs::write(&cfg, &yaml).unwrap();
+    let snap = config::load_str(&yaml, "test.yaml").expect("config ok");
+    let mut st = AppState::with_paths(snap, cfg.clone(), dir.join("logs"));
+    st.home = home;
+    let st = Arc::new(st);
+
+    // 默认按配置顺序返回
+    let (_, j) = call(st.clone(), LB, "GET", "/api/routing", None).await;
+    assert_eq!(j["groups"][0]["name"], "g");
+    assert_eq!(j["groups"][1]["name"], "a2");
+
+    // 坏组名 → 422 且不写盘
+    let before = std::fs::read(&cfg).unwrap();
+    let (code, _) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/routing",
+        Some(serde_json::json!({"order": ["ghost"]})),
+    )
+    .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(std::fs::read(&cfg).unwrap(), before);
+
+    // 重排：a2 提到第一
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/routing",
+        Some(serde_json::json!({"order": ["a2", "g"]})),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    assert_eq!(j["status"], "reloaded");
+    let (_, j) = call(st.clone(), LB, "GET", "/api/routing", None).await;
+    assert_eq!(j["groups"][0]["name"], "a2");
+    assert_eq!(j["groups"][1]["name"], "g");
+    // 部分列表：未列出的组保持原有相对顺序排尾部
+    let (code, _) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/routing",
+        Some(serde_json::json!({"order": ["g"]})),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    let (_, j) = call(st.clone(), LB, "GET", "/api/routing", None).await;
+    assert_eq!(j["groups"][0]["name"], "g");
+    assert_eq!(j["groups"][1]["name"], "a2");
+}
+
+#[tokio::test]
 async fn routing_test_endpoint_hits_upstream_models() {
     // mock 上游：GET /v1/models → 200
     let app = axum::Router::new().route(
