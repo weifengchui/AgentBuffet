@@ -6,6 +6,7 @@ pub mod failover;
 pub mod onboard;
 pub mod proxy;
 pub mod router;
+pub mod securebox;
 pub mod usage;
 pub mod vendors;
 
@@ -46,6 +47,15 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
         .route("/api/vendor-catalog", get(vendor_catalog))
         .route("/_admin/config", post(config_import))
         .route("/_admin/provider", post(provider_add))
+        .route("/_admin/provider/edit", post(provider_edit))
+        .route("/_admin/provider/delete", post(provider_delete))
+        .route("/_admin/group", post(group_upsert))
+        .route("/_admin/group/delete", post(group_delete))
+        .route("/_admin/agent", post(agent_upsert))
+        .route("/_admin/agent/delete", post(agent_delete))
+        .route("/_admin/gateway", post(gateway_edit))
+        .route("/_admin/export-enc", post(export_enc))
+        .route("/_admin/import-enc", post(import_enc))
         .route("/api/agents/attach", post(agent_attach))
         .route("/api/agents/detach", post(agent_detach))
         .route("/_admin/reload", post(reload))
@@ -646,7 +656,7 @@ fn write_env_key(path: &std::path::Path, name: &str, value: &str) -> std::io::Re
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let text = std::fs::read_to_string(path).unwrap_or_default();
     let line = format!("{name}={value}");
     let mut out: Vec<String> = Vec::new();
     let mut replaced = false;
@@ -662,11 +672,11 @@ fn write_env_key(path: &std::path::Path, name: &str, value: &str) -> std::io::Re
     if !replaced {
         out.push(line);
     }
-    std::fs::write(&path, out.join("\n") + "\n")?;
+    std::fs::write(path, out.join("\n") + "\n")?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
     Ok(())
 }
@@ -855,6 +865,683 @@ async fn provider_add(
                 arr.extend(extra_warnings.into_iter().map(serde_json::Value::String));
             }
         }
+    }
+    json_response(code, payload)
+}
+
+// ---------------------------------------------------------------- 表单化配置 CRUD
+
+/// 通用「读-改-校验-备份-写-热重载」管道：闭包修改 YAML 文档并返回警告列表。
+/// 任一步失败均 422 且不落盘；备份 `.bak` 已存在不覆盖（与 routing_edit 同范式）。
+async fn apply_config_edit<F>(st: &Arc<proxy::AppState>, f: F) -> (StatusCode, serde_json::Value)
+where
+    F: FnOnce(&mut serde_yaml::Value) -> Result<Vec<String>, String>,
+{
+    let Some(path) = st.config_path.clone() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error": "无配置文件路径，不支持编辑"}),
+        );
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": format!("读取配置失败: {e}")}),
+            )
+        }
+    };
+    let mut doc: serde_yaml::Value = match serde_yaml::from_str(&text) {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": "配置 YAML 解析失败", "details": [e.to_string()]}),
+            )
+        }
+    };
+    let warnings = match f(&mut doc) {
+        Ok(w) => w,
+        Err(msg) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": msg}),
+            )
+        }
+    };
+    let new_text = match serde_yaml::to_string(&doc) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": format!("序列化失败: {e}")}),
+            )
+        }
+    };
+    let filename = path.display().to_string();
+    if let Err(errs) = config::load_str(&new_text, &filename) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "配置校验失败", "details": errs}),
+        );
+    }
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    if !bak.exists() {
+        if let Err(e) = std::fs::copy(&path, &bak) {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": format!("备份失败: {e}")}),
+            );
+        }
+    }
+    if let Err(e) = std::fs::write(&path, &new_text) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": format!("写入配置失败: {e}")}),
+        );
+    }
+    let (code, mut payload) = do_reload(st).await;
+    if let Some(obj) = payload.as_object_mut() {
+        if !warnings.is_empty() {
+            obj.insert("warnings".into(), serde_json::json!(warnings));
+        }
+    }
+    (code, payload)
+}
+
+fn ystr(v: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(v.to_string())
+}
+
+fn find_in_seq(doc: &serde_yaml::Value, key: &str, id_key: &str, id: &str) -> bool {
+    doc.get(key)
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .any(|i| yaml_str(i, id_key).as_deref() == Some(id))
+        })
+        .unwrap_or(false)
+}
+
+fn ensure_seq(doc: &mut serde_yaml::Value, key: &str) {
+    match doc.get(key) {
+        None => doc[key] = serde_yaml::Value::Sequence(Vec::new()),
+        Some(v) if v.is_sequence() => {}
+        Some(_) => doc[key] = serde_yaml::Value::Sequence(Vec::new()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ProviderEdit {
+    id: String,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    models: Option<Vec<String>>,
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    quota_daily: Option<u64>,
+    #[serde(default)]
+    allow_private: Option<bool>,
+    #[serde(default)]
+    disabled: Option<bool>,
+}
+
+async fn provider_edit(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<ProviderEdit>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let id = body.id.clone();
+    let id2 = id.clone();
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        let list = doc
+            .get_mut("providers")
+            .and_then(|v| v.as_sequence_mut())
+            .ok_or_else(|| "providers 字段缺失或不是列表".to_string())?;
+        let item = list
+            .iter_mut()
+            .find(|i| yaml_str(i, "id").as_deref() == Some(id.as_str()))
+            .ok_or_else(|| format!("provider 不存在: {id}"))?;
+        if let Some(u) = body.base_url.filter(|x| !x.trim().is_empty()) {
+            item["base_url"] = ystr(u.trim());
+        }
+        if let Some(ms) = body.models {
+            item["models"] = seq_of_strings(
+                &ms.iter()
+                    .map(|m| m.trim().to_string())
+                    .filter(|m| !m.is_empty())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        match body.quota_daily {
+            Some(0) | None => {}
+            Some(n) => {
+                let mut q = serde_yaml::Mapping::new();
+                q.insert(ystr("daily_tokens"), serde_yaml::Value::Number(n.into()));
+                item["quota"] = serde_yaml::Value::Mapping(q);
+            }
+        }
+        if let Some(b) = body.allow_private {
+            if b {
+                item["allow_private"] = serde_yaml::Value::Bool(true);
+            } else {
+                if let Some(m) = item.as_mapping_mut() {
+                    m.remove(ystr("allow_private"));
+                }
+            }
+        }
+        if let Some(b) = body.disabled {
+            if b {
+                item["disabled"] = serde_yaml::Value::Bool(true);
+            } else {
+                if let Some(m) = item.as_mapping_mut() {
+                    m.remove(ystr("disabled"));
+                }
+            }
+        }
+        Ok(vec![])
+    })
+    .await;
+    // Key 单独走 env（0600），不进配置。
+    if code == StatusCode::OK {
+        if let Some(key) = body.api_key.filter(|k| !k.trim().is_empty()) {
+            let env_name = {
+                let snap = st.snap.read().await;
+                snap.providers
+                    .get(&id2)
+                    .map(|p| p.api_key_env.clone())
+                    .unwrap_or_else(|| vendors::env_name(&id2))
+            };
+            if let Err(e) = write_env_key(&st.env_file, &env_name, key.trim()) {
+                return json_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    serde_json::json!({"error": format!("写入 env 失败: {e}")}),
+                );
+            }
+            std::env::set_var(&env_name, key.trim());
+        }
+    }
+    json_response(code, payload)
+}
+
+#[derive(Debug, Deserialize)]
+struct IdReq {
+    id: String,
+}
+
+async fn provider_delete(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<IdReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let id = body.id.clone();
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        let mut warnings = Vec::new();
+        let list = doc
+            .get_mut("providers")
+            .and_then(|v| v.as_sequence_mut())
+            .ok_or_else(|| "providers 字段缺失或不是列表".to_string())?;
+        let before = list.len();
+        list.retain(|i| yaml_str(i, "id").as_deref() != Some(id.as_str()));
+        if list.len() == before {
+            return Err(format!("provider 不存在: {id}"));
+        }
+        // 同步清理路由组里引用它的成员，避免悬空引用校验失败。
+        if let Some(gs) = doc
+            .get_mut("routing_groups")
+            .and_then(|v| v.as_sequence_mut())
+        {
+            for g in gs.iter_mut() {
+                let name = yaml_str(g, "name");
+                if let Some(ms) = g.get_mut("members").and_then(|v| v.as_sequence_mut()) {
+                    let n0 = ms.len();
+                    ms.retain(|m| yaml_str(m, "provider").as_deref() != Some(id.as_str()));
+                    if ms.len() != n0 {
+                        if let Some(name) = name {
+                            warnings.push(format!(
+                                "已从路由组 {name} 移除 {}/{} 个成员",
+                                name,
+                                n0 - ms.len()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        // 成员清空的路由组一并删除（校验规则不允许空组）。
+        if let Some(gs) = doc
+            .get_mut("routing_groups")
+            .and_then(|v| v.as_sequence_mut())
+        {
+            let empties: Vec<String> = gs
+                .iter()
+                .filter(|g| {
+                    g.get("members")
+                        .and_then(|m| m.as_sequence())
+                        .map(|ms| ms.is_empty())
+                        .unwrap_or(true)
+                })
+                .filter_map(|g| yaml_str(g, "name"))
+                .collect();
+            if !empties.is_empty() {
+                gs.retain(|g| !empties.contains(&yaml_str(g, "name").unwrap_or_default()));
+                warnings.push(format!("空路由组已一并删除: {}", empties.join(", ")));
+            }
+        }
+        warnings.push(format!("env 中的 API Key 未删除，可在 {id} 复用"));
+        Ok(warnings)
+    })
+    .await;
+    json_response(code, payload)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GroupMemberIn {
+    provider: String,
+    model: String,
+    #[serde(default)]
+    priority: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroupUpsert {
+    name: String,
+    #[serde(default)]
+    strategy: Option<String>,
+    members: Vec<GroupMemberIn>,
+}
+
+async fn group_upsert(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<GroupUpsert>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    if body.name.trim().is_empty() {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "组名不能为空"}),
+        );
+    }
+    if body.members.is_empty() {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "路由组至少需要一个成员"}),
+        );
+    }
+    let name = body.name.trim().to_string();
+    let strategy = body
+        .strategy
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "order".into());
+    let members = body.members.clone();
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        ensure_seq(doc, "routing_groups");
+        let gs = doc
+            .get_mut("routing_groups")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("ensure_seq");
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(ystr("name"), ystr(&name));
+        if strategy != "order" {
+            map.insert(ystr("strategy"), ystr(&strategy));
+        }
+        let ms: Vec<serde_yaml::Value> = members
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let mut e = serde_yaml::Mapping::new();
+                e.insert(ystr("provider"), ystr(m.provider.trim()));
+                e.insert(ystr("model"), ystr(m.model.trim()));
+                e.insert(
+                    ystr("priority"),
+                    serde_yaml::Value::Number((m.priority.max(1) + i as u32).into()),
+                );
+                serde_yaml::Value::Mapping(e)
+            })
+            .collect();
+        map.insert(ystr("members"), serde_yaml::Value::Sequence(ms));
+        match gs
+            .iter_mut()
+            .find(|g| yaml_str(g, "name").as_deref() == Some(name.as_str()))
+        {
+            Some(g) => *g = serde_yaml::Value::Mapping(map),
+            None => gs.push(serde_yaml::Value::Mapping(map)),
+        }
+        Ok(vec![])
+    })
+    .await;
+    json_response(code, payload)
+}
+
+#[derive(Debug, Deserialize)]
+struct NameReq {
+    name: String,
+}
+
+async fn group_delete(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<NameReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let name = body.name.clone();
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        let gs = doc
+            .get_mut("routing_groups")
+            .and_then(|v| v.as_sequence_mut())
+            .ok_or_else(|| "routing_groups 字段缺失".to_string())?;
+        let before = gs.len();
+        gs.retain(|g| yaml_str(g, "name").as_deref() != Some(name.as_str()));
+        if gs.len() == before {
+            return Err(format!("路由组不存在: {name}"));
+        }
+        Ok(vec![])
+    })
+    .await;
+    json_response(code, payload)
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentUpsert {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    default_group: String,
+}
+
+async fn agent_upsert(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<AgentUpsert>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let id = body.id.trim().to_string();
+    if id.is_empty() || body.default_group.trim().is_empty() {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "agent id 与默认组不能为空"}),
+        );
+    }
+    let dg = body.default_group.trim().to_string();
+    let dn = body.display_name.unwrap_or_default();
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        if !find_in_seq(doc, "routing_groups", "name", &dg) {
+            return Err(format!("路由组不存在: {dg}"));
+        }
+        ensure_seq(doc, "agents");
+        let as_ = doc
+            .get_mut("agents")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("ensure_seq");
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(ystr("id"), ystr(&id));
+        if !dn.trim().is_empty() {
+            map.insert(ystr("display_name"), ystr(dn.trim()));
+        }
+        map.insert(ystr("default_group"), ystr(&dg));
+        match as_
+            .iter_mut()
+            .find(|a| yaml_str(a, "id").as_deref() == Some(id.as_str()))
+        {
+            Some(a) => *a = serde_yaml::Value::Mapping(map),
+            None => as_.push(serde_yaml::Value::Mapping(map)),
+        }
+        Ok(vec![])
+    })
+    .await;
+    json_response(code, payload)
+}
+
+async fn agent_delete(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<IdReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let id = body.id.clone();
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        let as_ = doc
+            .get_mut("agents")
+            .and_then(|v| v.as_sequence_mut())
+            .ok_or_else(|| "agents 字段缺失".to_string())?;
+        let before = as_.len();
+        as_.retain(|a| yaml_str(a, "id").as_deref() != Some(id.as_str()));
+        if as_.len() == before {
+            return Err(format!("agent 不存在: {id}"));
+        }
+        Ok(vec![format!(
+            "已删除 agent {id} 的配置；若此前已接入工具，其本地配置文件不受影响，可在接入器视图还原"
+        )])
+    })
+    .await;
+    json_response(code, payload)
+}
+
+#[derive(Debug, Deserialize)]
+struct GatewayEdit {
+    #[serde(default)]
+    addr: Option<String>,
+    #[serde(default)]
+    ui_addr: Option<String>,
+    #[serde(default)]
+    log_retain_days: Option<u32>,
+    #[serde(default)]
+    expose_groups_as_models: Option<bool>,
+}
+
+async fn gateway_edit(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<GatewayEdit>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let (code, payload) = apply_config_edit(&st, move |doc| {
+        if doc.get("gateway").map(|v| !v.is_mapping()).unwrap_or(true) {
+            doc["gateway"] = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+        }
+        let g = doc
+            .get_mut("gateway")
+            .and_then(|v| v.as_mapping_mut())
+            .expect("gateway");
+        let mut set = |k: &str, v: Option<serde_yaml::Value>| {
+            if let Some(v) = v {
+                g.insert(ystr(k), v);
+            }
+        };
+        set(
+            "addr",
+            body.addr
+                .filter(|a| !a.trim().is_empty())
+                .map(|a| ystr(a.trim())),
+        );
+        set(
+            "ui_addr",
+            body.ui_addr
+                .filter(|a| !a.trim().is_empty())
+                .map(|a| ystr(a.trim())),
+        );
+        if let Some(n) = body.log_retain_days {
+            g.insert(ystr("log_retain_days"), serde_yaml::Value::Number(n.into()));
+        }
+        if let Some(b) = body.expose_groups_as_models {
+            g.insert(ystr("expose_groups_as_models"), serde_yaml::Value::Bool(b));
+        }
+        Ok(vec![])
+    })
+    .await;
+    json_response(code, payload)
+}
+
+// ---------------------------------------------------------------- 加密备份
+
+fn read_env_pairs(path: &std::path::Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            if l.is_empty() || l.starts_with('#') {
+                return None;
+            }
+            l.split_once('=')
+                .map(|(k, v)| (k.trim().to_string(), v.to_string()))
+        })
+        .collect()
+}
+
+#[derive(Debug, Deserialize)]
+struct EncReq {
+    password: String,
+}
+
+/// 导出加密备份：config.yaml + env 全部键值 → JSON → Argon2id+AES-256-GCM → base64。
+async fn export_enc(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<EncReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let err =
+        |code: StatusCode, msg: String| json_response(code, serde_json::json!({"error": msg}));
+    if body.password.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "密码不能为空".into());
+    }
+    let Some(path) = st.config_path.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "无配置文件路径".into());
+    };
+    let config_text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("读取配置失败: {e}"),
+            )
+        }
+    };
+    let env: serde_json::Map<String, serde_json::Value> = read_env_pairs(&st.env_file)
+        .into_iter()
+        .map(|(k, v)| (k, serde_json::Value::String(v)))
+        .collect();
+    let plain = serde_json::to_vec(&serde_json::json!({"config": config_text, "env": env}))
+        .unwrap_or_default();
+    let blob = match securebox::seal(&body.password, &plain) {
+        Ok(b) => b,
+        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, e),
+    };
+    use base64::Engine;
+    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    json_response(
+        StatusCode::OK,
+        serde_json::json!({"filename": format!("agentbuffet-backup-{stamp}.aback"), "data_b64": data_b64}),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct EncImport {
+    password: String,
+    data_b64: String,
+}
+
+/// 导入加密备份：解密 → 校验 config → 写 config.yaml（.bak）+ 合并 env 键 + 热重载。
+async fn import_enc(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<EncImport>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let err =
+        |code: StatusCode, msg: String| json_response(code, serde_json::json!({"error": msg}));
+    let Some(path) = st.config_path.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "无配置文件路径".into());
+    };
+    use base64::Engine;
+    let blob = match base64::engine::general_purpose::STANDARD.decode(body.data_b64.trim()) {
+        Ok(b) => b,
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "备份数据不是有效的 base64".into(),
+            )
+        }
+    };
+    let plain = match securebox::unseal(&body.password, &blob) {
+        Ok(p) => p,
+        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, e),
+    };
+    let val: serde_json::Value = match serde_json::from_slice(&plain) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "备份内容损坏".into()),
+    };
+    let Some(config_text) = val.get("config").and_then(|c| c.as_str()) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "备份缺少 config 字段".into(),
+        );
+    };
+    let filename = path.display().to_string();
+    if let Err(errs) = config::load_str(config_text, &filename) {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "配置校验失败", "details": errs}),
+        );
+    }
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    if !bak.exists() {
+        if let Err(e) = std::fs::copy(&path, &bak) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, format!("备份失败: {e}"));
+        }
+    }
+    if let Err(e) = std::fs::write(&path, config_text) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("写入配置失败: {e}"),
+        );
+    }
+    let mut env_count = 0usize;
+    if let Some(map) = val.get("env").and_then(|e| e.as_object()) {
+        for (k, v) in map {
+            let Some(v) = v.as_str() else { continue };
+            if let Err(e) = write_env_key(&st.env_file, k, v) {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("写入 env 失败: {e}"),
+                );
+            }
+            std::env::set_var(k, v);
+            env_count += 1;
+        }
+    }
+    let (code, mut payload) = do_reload(&st).await;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("env_keys".into(), serde_json::json!(env_count));
     }
     json_response(code, payload)
 }
