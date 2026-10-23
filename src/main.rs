@@ -55,7 +55,9 @@ fn usage(code: i32) -> ! {
         \x20     buffetd agents detect|status       列出全部 agent 接入状态\n\
         \x20     buffetd agents attach <id> [--group g] [--dry-run]\n\
         \x20     buffetd agents detach <id>         还原（备份优先，逐字节）\n\
-        \x20     buffetd service install|uninstall  写/删 systemd 用户级自启单元"
+        \x20     buffetd service install|uninstall  写/删 systemd 用户级自启单元\n\
+        \x20     buffetd config export [--out PATH]   导出当前配置（默认 stdout）\n\
+        \x20     buffetd config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）"
     );
     std::process::exit(code);
 }
@@ -69,6 +71,7 @@ async fn main() {
         "reload" => reload_cmd().await,
         "agents" => agents_cmd(&args[1..]),
         "service" => service_cmd(&args[1..]),
+        "config" => config_cmd(&args[1..]),
         "help" | "-h" | "--help" => usage(0),
         other => {
             eprintln!("buffetd: 未知命令: {other}");
@@ -277,6 +280,87 @@ fn unit_path() -> PathBuf {
         .join("systemd")
         .join("user")
         .join("agentbuffet.service")
+}
+
+fn config_cmd(args: &[String]) {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+    match sub {
+        "export" => {
+            let mut out: Option<PathBuf> = None;
+            let mut i = 1;
+            while i < args.len() {
+                match (args[i].as_str(), args.get(i + 1)) {
+                    ("--out", Some(v)) => {
+                        out = Some(PathBuf::from(v));
+                        i += 1;
+                    }
+                    other => {
+                        eprintln!("buffetd: 未知参数: {:?}", other.0);
+                        std::process::exit(2);
+                    }
+                }
+                i += 1;
+            }
+            let path = default_config_path();
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("buffetd: 读取 {} 失败: {e}", path.display());
+                    std::process::exit(1);
+                }
+            };
+            match out {
+                Some(o) => {
+                    if let Err(e) = std::fs::write(&o, &text) {
+                        eprintln!("buffetd: 写入 {} 失败: {e}", o.display());
+                        std::process::exit(1);
+                    }
+                    eprintln!("已导出 {} → {}", path.display(), o.display());
+                }
+                None => print!("{text}"),
+            }
+        }
+        "import" => {
+            let Some(src) = args.get(1) else {
+                eprintln!("buffetd: 用法: buffetd config import PATH");
+                std::process::exit(2);
+            };
+            let text = match std::fs::read_to_string(src) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("buffetd: 读取 {src} 失败: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let dst = default_config_path();
+            if let Err(errs) = agentbuffet::config::load_str(&text, src) {
+                eprintln!("buffetd: 配置校验失败，未写入: {errs:?}");
+                std::process::exit(1);
+            }
+            if dst.exists() {
+                let bak = PathBuf::from(format!("{}.bak", dst.display()));
+                if !bak.exists() {
+                    if let Err(e) = std::fs::copy(&dst, &bak) {
+                        eprintln!("buffetd: 备份 {} 失败: {e}", bak.display());
+                        std::process::exit(1);
+                    }
+                }
+            }
+            if let Some(dir) = dst.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(e) = std::fs::write(&dst, &text) {
+                eprintln!("buffetd: 写入 {} 失败: {e}", dst.display());
+                std::process::exit(1);
+            }
+            println!("已导入配置 → {}", dst.display());
+            println!("运行中的网关执行 buffetd reload 即可热重载生效。");
+        }
+        other => {
+            eprintln!("buffetd: 用法: buffetd config export [--out PATH] | buffetd config import PATH（未知: {other}）");
+            std::process::exit(2);
+        }
+    }
 }
 
 fn service_cmd(args: &[String]) {

@@ -41,6 +41,8 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
         .route("/api/providers", get(providers_view))
         .route("/api/routing", get(routing_view))
         .route("/api/agents", get(agents_view))
+        .route("/api/config", get(config_get))
+        .route("/_admin/config", post(config_import))
         .route("/api/agents/attach", post(agent_attach))
         .route("/api/agents/detach", post(agent_detach))
         .route("/_admin/reload", post(reload))
@@ -528,6 +530,85 @@ async fn routing_edit(
         }
     }
     if let Err(e) = std::fs::write(&path, &new_text) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("写入配置失败: {e}"),
+        );
+    }
+    let (code, payload) = do_reload(&st).await;
+    json_response(code, payload)
+}
+
+// ---------------------------------------------------------------- 配置导入导出
+
+/// 导出：返回当前 config.yaml 原文（Key 本就不在配置中，导出安全）。
+async fn config_get(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let err =
+        |code: StatusCode, msg: String| json_response(code, serde_json::json!({"error": msg}));
+    let Some(path) = &st.config_path else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "无配置文件路径，不支持导出".into(),
+        );
+    };
+    match std::fs::read_to_string(path) {
+        Ok(text) => json_response(
+            StatusCode::OK,
+            serde_json::json!({"path": path.display().to_string(), "text": text}),
+        ),
+        Err(e) => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("读取配置失败: {e}"),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfigImport {
+    text: String,
+}
+
+/// 导入：整份替换 config.yaml。校验失败 422 且不写盘；写前备份 `.bak`（已存在不覆盖）；
+/// 成功后复用热重载，旧快照继续服务直到新配置生效。
+async fn config_import(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<ConfigImport>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let err =
+        |code: StatusCode, msg: String| json_response(code, serde_json::json!({"error": msg}));
+    let Some(path) = st.config_path.clone() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "无配置文件路径，不支持导入".into(),
+        );
+    };
+    let filename = path.display().to_string();
+    if let Err(errs) = config::load_str(&body.text, &filename) {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "配置校验失败", "details": errs}),
+        );
+    }
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    if !bak.exists() {
+        if let Err(e) = std::fs::copy(&path, &bak) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("备份 {} 失败: {e}", bak.display()),
+            );
+        }
+    }
+    if let Err(e) = std::fs::write(&path, &body.text) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("写入配置失败: {e}"),
