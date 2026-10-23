@@ -22,7 +22,7 @@ tar czf "$DIST/agentbuffet-linux-x86_64.tar.gz" -C "$DIST" agentbuffet-linux-x86
 echo "==> Windows ($WIN_T)"
 if command -v zig >/dev/null 2>&1 || [ -x /tmp/opencode/zig14/zig ]; then
   ZIGBIN="$(command -v zig || echo /tmp/opencode/zig14/zig)"
-  PATH="$(dirname "$ZIGBIN"):PATH" cargo zigbuild --release --target "$WIN_T"
+  PATH="$(dirname "$ZIGBIN"):$PATH" cargo zigbuild --release --target "$WIN_T"
   mkdir -p "$DIST/agentbuffet-windows-x86_64"
   cp "$CARGO_TARGET_DIR/$WIN_T/release/buffetd.exe" "$DIST/agentbuffet-windows-x86_64/"
   cp README.md "$DIST/agentbuffet-windows-x86_64/" 2>/dev/null || true
