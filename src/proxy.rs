@@ -41,6 +41,8 @@ pub struct AppState {
     pub usage: Option<Arc<Usage>>,
     /// 热重载读取的配置文件路径。
     pub config_path: Option<PathBuf>,
+    /// 接入器读写 Agent 配置文件所用的用户主目录。
+    pub home: PathBuf,
 }
 
 fn mk_client(snap: &Snapshot) -> reqwest::Client {
@@ -61,6 +63,7 @@ impl AppState {
             states: Arc::new(StateTable::new()),
             usage: None,
             config_path: None,
+            home: crate::onboard::home_dir(),
         }
     }
 
@@ -74,6 +77,7 @@ impl AppState {
             states: Arc::new(StateTable::new()),
             usage: Some(usage),
             config_path: Some(config_path),
+            home: crate::onboard::home_dir(),
         }
     }
 }
@@ -290,6 +294,7 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
             Err(fail) => {
                 chain.push(format!("{}:{}", p.id, fail.tag));
                 let now2 = now_epoch_secs();
+                state.states.note_failure(&p.id, &fail.tag, now2);
                 match fail.kind {
                     FailKind::Circuit => {
                         state

@@ -31,6 +31,8 @@ struct ProviderState {
     tokens_used: u64,
     /// 429（无 retry-after）收紧系数：每收到一次乘 conservative_quota_ratio。
     tighten: f64,
+    /// 最近一次失败（epoch 秒, 原因标签），供 Providers 视图展示。
+    last_fail: Option<(u64, String)>,
 }
 
 impl ProviderState {
@@ -42,6 +44,7 @@ impl ProviderState {
             day: day_of(now),
             tokens_used: 0,
             tighten: 1.0,
+            last_fail: None,
         }
     }
 }
@@ -198,6 +201,50 @@ impl StateTable {
             st.fail_times.clear();
         }
     }
+
+    /// 记录最近一次失败原因（Providers 视图"最近失败"用），不影响熔断判定。
+    pub fn note_failure(&self, id: &str, reason: &str, now: u64) {
+        self.with_state(id, now, |st| {
+            st.last_fail = Some((now, reason.to_string()));
+        });
+    }
+
+    /// Providers 视图状态快照：仅返回已有运行时状态的 provider（惰性建表不污染）。
+    pub fn snapshot(&self, now: u64) -> HashMap<String, ProviderSnap> {
+        let mut g = self.inner.lock().unwrap();
+        let today = day_of(now);
+        let mut out = HashMap::new();
+        for (id, st) in g.iter_mut() {
+            if st.day != today {
+                st.day = today;
+                st.tokens_used = 0;
+                st.tighten = 1.0;
+            }
+            out.insert(
+                id.clone(),
+                ProviderSnap {
+                    degraded: st.degraded,
+                    circuit_open_until: st.open_until.filter(|u| *u > now),
+                    tokens_used: st.tokens_used,
+                    tighten: st.tighten,
+                    last_fail_ts: st.last_fail.as_ref().map(|(t, _)| *t),
+                    last_fail_reason: st.last_fail.as_ref().map(|(_, r)| r.clone()),
+                },
+            );
+        }
+        out
+    }
+}
+
+/// 单个 provider 的运行时状态快照（UI Providers 视图）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderSnap {
+    pub degraded: bool,
+    pub circuit_open_until: Option<u64>,
+    pub tokens_used: u64,
+    pub tighten: f64,
+    pub last_fail_ts: Option<u64>,
+    pub last_fail_reason: Option<String>,
 }
 
 #[cfg(test)]

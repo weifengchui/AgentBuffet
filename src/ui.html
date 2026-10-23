@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentBuffet · Agent食堂</title>
+<style>
+:root {
+  --bg: #10141a; --panel: #171d26; --line: #263041; --text: #d7dee8;
+  --dim: #8a97a8; --accent: #4da3ff; --ok: #3fb96f; --warn: #e0a63c; --bad: #e05c5c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 "SF Mono", "Cascadia Code", Consolas, "Noto Sans Mono CJK SC", monospace; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 16px; margin: 0; color: var(--accent); }
+header .sub { color: var(--dim); font-size: 12px; }
+nav { display: flex; gap: 6px; margin-left: auto; }
+nav button { background: none; border: 1px solid var(--line); color: var(--dim);
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
+nav button.on { color: var(--text); border-color: var(--accent); background: #1b2a3d; }
+main { padding: 18px 20px 40px; max-width: 1200px; margin: 0 auto; }
+.view { display: none; } .view.on { display: block; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
+button.act { background: #1b2a3d; border: 1px solid var(--line); color: var(--accent);
+  padding: 5px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+button.act:hover { border-color: var(--accent); }
+button.act.danger { color: var(--bad); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.card .k { color: var(--dim); font-size: 12px; }
+.card .v { font-size: 20px; margin-top: 4px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); font-size: 13px; }
+th { color: var(--dim); font-weight: normal; background: #131923; }
+tr:last-child td { border-bottom: none; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid; }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+.badge.warn { color: var(--warn); border-color: var(--warn); }
+.badge.bad { color: var(--bad); border-color: var(--bad); }
+.badge.dim { color: var(--dim); border-color: var(--line); }
+.bar { background: #0c1015; border-radius: 4px; height: 8px; width: 120px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+pre { background: #0c1015; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; overflow-x: auto; font-size: 12px; color: #b8c4d4; }
+.muted { color: var(--dim); font-size: 12px; }
+.group { margin-bottom: 18px; }
+.group h3 { margin: 0 0 8px; font-size: 14px; color: var(--accent); }
+.msg { margin-top: 10px; white-space: pre-wrap; }
+select { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AgentBuffet</h1><span class="sub">Agent食堂 · 本地网关</span>
+  <nav>
+    <button data-v="overview" class="on">Overview</button>
+    <button data-v="providers">Providers</button>
+    <button data-v="routing">Routing</button>
+    <button data-v="agents">Agents</button>
+  </nav>
+</header>
+<main>
+  <section id="v-overview" class="view on">
+    <div class="toolbar"><button class="act" onclick="loadOverview()">刷新</button>
+      <span class="muted" id="ov-date"></span></div>
+    <div class="cards">
+      <div class="card"><div class="k">今日请求</div><div class="v" id="ov-req">-</div></div>
+      <div class="card"><div class="k">Prompt tokens</div><div class="v" id="ov-pt">-</div></div>
+      <div class="card"><div class="k">Completion tokens</div><div class="v" id="ov-ct">-</div></div>
+      <div class="card"><div class="k">费用估算</div><div class="v" id="ov-cost">-</div></div>
+    </div>
+    <h3 class="muted">最近 20 条</h3>
+    <table><thead><tr><th>时间</th><th>Agent</th><th>组</th><th>Provider</th><th>Model</th>
+      <th>状态</th><th>Token</th><th>费用</th><th>耗时</th><th>失败链</th></tr></thead>
+      <tbody id="ov-recent"></tbody></table>
+  </section>
+
+  <section id="v-providers" class="view">
+    <div class="toolbar"><button class="act" onclick="loadProviders()">刷新</button>
+      <span class="muted">额度 = 当日软上限（保守系数×收紧系数）</span></div>
+    <table><thead><tr><th>Provider</th><th>Vendor</th><th>状态</th><th>当日 tokens / 软上限</th>
+      <th>最近失败</th><th>操作</th></tr></thead><tbody id="pv-rows"></tbody></table>
+    <div class="msg muted" id="pv-msg"></div>
+  </section>
+
+  <section id="v-routing" class="view">
+    <div class="toolbar"><button class="act" onclick="loadRouting()">刷新</button>
+      <span class="muted">↑↓ 调整优先级即时写回 config.yaml 并热重载</span></div>
+    <div id="rt-rows"></div>
+    <div class="msg muted" id="rt-msg"></div>
+  </section>
+
+  <section id="v-agents" class="view">
+    <div class="toolbar"><button class="act" onclick="loadAgents()">刷新</button>
+      <span class="muted">attach 只写占位 Key；detach 从备份逐字节还原</span></div>
+    <table><thead><tr><th>Agent</th><th>适配器</th><th>状态</th><th>默认组</th>
+      <th>操作</th></tr></thead><tbody id="ag-rows"></tbody></table>
+    <div class="msg" id="ag-msg"></div>
+    <pre id="ag-diff" style="display:none"></pre>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+const fmt = (n) => (n ?? 0).toLocaleString();
+const tstr = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString() : "-";
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || (j.details ? j.details.join("; ") : "HTTP " + r.status));
+  return j;
+}
+const post = (path, body) => api(path, {
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+});
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("on"));
+  $("v-" + b.dataset.v).classList.add("on");
+  ({ overview: loadOverview, providers: loadProviders, routing: loadRouting, agents: loadAgents })[b.dataset.v]();
+});
+
+// ---------------- Overview ----------------
+async function loadOverview() {
+  try {
+    const j = await api("/api/overview");
+    $("ov-date").textContent = "日期 " + j.date;
+    $("ov-req").textContent = fmt(j.totals.requests);
+    $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
+    $("ov-ct").textContent = fmt(j.totals.completion_tokens);
+    $("ov-cost").textContent = (j.totals.cost_est ?? 0).toFixed(4);
+    $("ov-recent").innerHTML = (j.recent || []).map(e => `<tr>
+      <td>${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
+      <td>${esc(e.provider)}</td><td>${esc(e.model)}</td>
+      <td><span class="badge ${e.status < 400 ? "ok" : "bad"}">${e.status}</span></td>
+      <td>${fmt(e.prompt_tokens)}/${fmt(e.completion_tokens)}</td>
+      <td>${e.cost_est == null ? "-" : e.cost_est.toFixed(4)}</td>
+      <td>${e.duration_ms}ms</td><td class="muted">${esc((e.fail_chain || []).join(" → "))}</td>
+    </tr>`).join("") || '<tr><td colspan="10" class="muted">暂无记录</td></tr>';
+  } catch (err) { $("ov-recent").innerHTML = `<tr><td colspan="10">${esc(err.message)}</td></tr>`; }
+}
+
+// ---------------- Providers ----------------
+const stBadge = (s) => ({ ok: "ok", disabled: "dim", degraded: "bad",
+  circuit_open: "warn", quota_exhausted: "warn" })[s] || "dim";
+
+async function loadProviders() {
+  $("pv-msg").textContent = "";
+  try {
+    const rows = await api("/api/providers");
+    $("pv-rows").innerHTML = rows.map(p => {
+      const cap = p.effective_cap ?? p.quota_daily;
+      const pct = cap ? Math.min(100, Math.round((p.tokens_used / cap) * 100)) : 0;
+      const quota = cap ? `<div class="bar"><i style="width:${pct}%"></i></div>
+        <span class="muted">${fmt(p.tokens_used)} / ${fmt(cap)}（${pct}%）</span>`
+        : `<span class="muted">${fmt(p.tokens_used)}（未设额度）</span>`;
+      const fail = p.last_fail_reason ? `${esc(p.last_fail_reason)} · ${tstr(p.last_fail_ts)}` : "-";
+      const dis = p.status === "disabled";
+      return `<tr><td>${esc(p.id)}</td><td>${esc(p.vendor)}</td>
+        <td><span class="badge ${stBadge(p.status)}">${esc(p.status)}</span></td>
+        <td>${quota}</td><td class="muted">${fail}</td>
+        <td><button class="act" onclick="testPv('${esc(p.id)}')">测试</button>
+        <button class="act ${dis ? "" : "danger"}" onclick="togglePv('${esc(p.id)}',${dis})">${dis ? "启用" : "停用"}</button></td></tr>`;
+    }).join("") || '<tr><td colspan="6" class="muted">无 provider</td></tr>';
+  } catch (err) { $("pv-msg").textContent = err.message; }
+}
+async function testPv(id) {
+  $("pv-msg").textContent = "测试 " + id + " …";
+  try {
+    const r = await post("/_admin/routing/test", { provider: id });
+    $("pv-msg").textContent = `${id}: ${r.ok ? "OK" : "失败"} status=${r.status ?? "-"} 耗时=${r.latency_ms ?? "-"}ms ${r.error ?? ""}`;
+  } catch (err) { $("pv-msg").textContent = err.message; }
+}
+async function togglePv(id, nowDisabled) {
+  try { await post("/_admin/routing", { provider: id, disabled: !nowDisabled }); loadProviders(); }
+  catch (err) { $("pv-msg").textContent = err.message; }
+}
+
+// ---------------- Routing ----------------
+let rtGroups = [];
+async function loadRouting() {
+  $("rt-msg").textContent = "";
+  try {
+    rtGroups = (await api("/api/routing")).groups || [];
+    $("rt-rows").innerHTML = rtGroups.map((g, gi) => `<div class="group"><h3>${esc(g.name)}
+      <span class="muted">（${esc(g.strategy)}）</span></h3><table><thead>
+      <tr><th>优先级</th><th>Provider</th><th>Model</th><th>状态</th><th>调整</th></tr></thead><tbody>`
+      + g.members.map((m, mi) => `<tr><td>${m.priority}</td><td>${esc(m.provider)}</td>
+        <td>${esc(m.model)}</td>
+        <td><span class="badge ${m.disabled ? "dim" : "ok"}">${m.disabled ? "停用" : "启用"}</span></td>
+        <td><button class="act" onclick="move(${gi},${mi},-1)">↑</button>
+        <button class="act" onclick="move(${gi},${mi},1)">↓</button>
+        <button class="act ${m.disabled ? "" : "danger"}" onclick="dis(${gi},'${esc(m.provider)}',${m.disabled})">${m.disabled ? "启用" : "停用"}</button>
+        </td></tr>`).join("") + "</tbody></table></div>").join("")
+      || '<span class="muted">无路由组</span>';
+  } catch (err) { $("rt-msg").textContent = err.message; }
+}
+async function move(gi, mi, dir) {
+  const g = rtGroups[gi];
+  const j = mi + dir;
+  if (j < 0 || j >= g.members.length) return;
+  const ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority }));
+  [ms[mi].priority, ms[j].priority] = [ms[j].priority, ms[mi].priority];
+  try { await post("/_admin/routing", { group: g.name, members: ms }); loadRouting(); }
+  catch (err) { $("rt-msg").textContent = err.message; }
+}
+async function dis(gi, provider, nowDisabled) {
+  try { await post("/_admin/routing", { provider, disabled: !nowDisabled }); loadRouting(); }
+  catch (err) { $("rt-msg").textContent = err.message; }
+}
+
+// ---------------- Agents ----------------
+async function loadAgents() {
+  $("ag-msg").textContent = "";
+  try {
+    const rows = await api("/api/agents");
+    $("ag-rows").innerHTML = rows.map(a => {
+      const badge = a.attached
+        ? (a.drifted ? '<span class="badge warn">漂移</span>' : '<span class="badge ok">已接入</span>')
+        : '<span class="badge dim">未接入</span>';
+      return `<tr><td>${esc(a.agent_id)}</td><td>${esc(a.adapter)}</td>
+        <td>${badge} <span class="muted">${esc(a.note || "")}</span></td>
+        <td class="muted">${esc(a.config_path || "-")}</td>
+        <td><button class="act" onclick="opA('${esc(a.agent_id)}',true)">预览</button>
+        <button class="act" onclick="opA('${esc(a.agent_id)}',false)">接入</button>
+        <button class="act danger" onclick="deA('${esc(a.agent_id)}')">还原</button></td></tr>`;
+    }).join("") || '<tr><td colspan="5" class="muted">配置中无 agent</td></tr>';
+  } catch (err) { $("ag-msg").textContent = err.message; }
+}
+async function opA(id, dry) {
+  $("ag-msg").textContent = (dry ? "预览" : "接入") + " " + id + " …";
+  try {
+    const r = await post("/api/agents/attach", { agent_id: id, dry_run: dry });
+    $("ag-msg").textContent = r.note || "完成";
+    const d = (r.files || []).map(f => `--- ${f.path}\n${f.preview}`).join("\n");
+    $("ag-diff").style.display = d ? "block" : "none";
+    $("ag-diff").textContent = d || (r.env_template || "");
+    if (!dry) loadAgents();
+  } catch (err) { $("ag-msg").textContent = err.message; }
+}
+async function deA(id) {
+  $("ag-msg").textContent = "还原 " + id + " …";
+  try {
+    const r = await post("/api/agents/detach", { agent_id: id });
+    $("ag-msg").textContent = r.note || "完成";
+    loadAgents();
+  } catch (err) { $("ag-msg").textContent = err.message; }
+}
+
+loadOverview();
+</script>
+</body>
+</html>

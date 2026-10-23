@@ -166,6 +166,43 @@ impl Usage {
     pub fn counters(&self) -> HashMap<(String, String, String), Counters> {
         self.counters.lock().unwrap().clone()
     }
+
+    /// 最近 n 条流水（Overview 视图）：只读当日 JSONL 末尾至多 1 MiB，丢半行、坏行跳过。
+    pub fn recent(&self, n: usize) -> Vec<Event> {
+        use std::io::{Read, Seek, SeekFrom};
+        const CAP: u64 = 1 << 20;
+        let path = self.day_file(now_epoch_secs());
+        let Ok(mut f) = std::fs::File::open(&path) else {
+            return Vec::new();
+        };
+        let size = match f.seek(SeekFrom::End(0)) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let start = size.saturating_sub(CAP);
+        if f.seek(SeekFrom::Start(start)).is_err() {
+            return Vec::new();
+        }
+        let mut buf = Vec::new();
+        if f.read_to_end(&mut buf).is_err() {
+            return Vec::new();
+        }
+        // 从中间截断读取时，首行可能是半行，丢弃之
+        if start > 0 {
+            if let Some(pos) = buf.iter().position(|b| *b == b'\n') {
+                buf.drain(0..=pos);
+            }
+        }
+        let text = String::from_utf8_lossy(&buf);
+        let mut out: Vec<Event> = text
+            .lines()
+            .rev()
+            .filter_map(|l| serde_json::from_str::<Event>(l.trim()).ok())
+            .take(n)
+            .collect();
+        out.reverse();
+        out
+    }
 }
 
 /// epoch 秒 → "YYYY-MM-DD"（UTC）。days→civil 自算（Howard Hinnant 算法），不引 chrono。
