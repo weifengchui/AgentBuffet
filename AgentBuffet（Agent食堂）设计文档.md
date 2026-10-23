@@ -237,6 +237,7 @@ buffetd agents status                 # 网关侧记录 vs Agent 实际配置的
 ```
 
 - `cost_est`：prices.yaml 未命中该 model 时记 `null`，UI 显示"价格未知"，**不得按 0 计**。
+- 单价口径：`prices.yaml` 按**每 1M tokens** 记各模型 input/output 单价；日期文件名按 UTC。
 
 **内存聚合**：今日 counters 按 `(agent, group, provider)` 元组累加请求数/tokens/费用/失败数，每次请求只是整数加法，UI 读取无文件 IO。
 
@@ -265,7 +266,7 @@ buffetd agents status                 # 网关侧记录 vs Agent 实际配置的
 |---|---|---|
 | M1 ✅ | 网关内核 + 路径式 Agent 识别 + model→组解析 + OpenAI 兼容转发（含流式零缓冲与首 chunk peek） | curl 通、SSE 不断流、`group/` 模型可路由、CPU 空闲 <1% |
 | M2 ✅ | 供应商管理 + order 故障转移 + 熔断 + 额度软上限与 429 被动校准 | mock server（allow_private）模拟 429/超时/流中断自动切换 |
-| M3 | JSONL 记录 + 内存今日聚合（含启动恢复）+ 价格表 + 快照式热重载 | 改配置不重启、重启后今日数据不丢、UI 刷新不扫盘 |
+| M3 ✅ | JSONL 记录 + 内存今日聚合（含启动恢复）+ 价格表 + 快照式热重载 | 改配置不重启、重启后今日数据不丢、UI 刷新不扫盘 |
 | M4 | Web UI 四视图 + `/health` + 自启脚本 + **接入器（detect/attach/detach，OpenCode/Codex/通用三适配器）** | 开关一拨 Agent 即走网关；detach 后配置逐字节还原 |
 | M5 | 性能打磨 + 三平台打包 + CI（含 mock provider 与适配器 schema 测试） | 空闲 CPU<0.5%，内存<30MB |
 | v1.1 | Anthropic Messages 适配（含 Claude Code 接入）、smart 调度、model_map、订阅 token 接入 | — |

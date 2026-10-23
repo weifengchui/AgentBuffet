@@ -1,27 +1,34 @@
 //! OpenAI 兼容转发 + 故障转移：候选循环、熔断、额度软上限、429 被动校准。
 //! 硬约束：流式零缓冲（仅首 chunk peek）；绝不写到一半换供应商。
+//! M3：请求终局按 §8 记 usage 事件（非流式在 handle、流式在流完成分支）。
 
 use crate::config::{Provider, Snapshot};
 use crate::failover::{now_epoch_secs, StateTable};
 use crate::router;
+use crate::usage::{Event, Usage};
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, Response, StatusCode};
 use bytes::Bytes;
 use futures_util::StreamExt;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// 流式 usage 跨 poll 累计器（unfold 闭包多次调用间读写）。
 struct UsageAcc {
+    pt: u64,
+    ct: u64,
     total: u64,
 }
 
 impl UsageAcc {
-    fn add(&mut self, t: u64) {
+    fn add(&mut self, p: u64, c: u64, t: u64) {
+        self.pt += p;
+        self.ct += c;
         self.total += t;
     }
 }
@@ -30,22 +37,102 @@ pub struct AppState {
     pub snap: RwLock<Arc<Snapshot>>,
     pub client: reqwest::Client,
     pub states: Arc<StateTable>,
+    /// M3 用量记录器；None 时完全不记账（m1/m2 测试路径）。
+    pub usage: Option<Arc<Usage>>,
+    /// 热重载读取的配置文件路径。
+    pub config_path: Option<PathBuf>,
+}
+
+fn mk_client(snap: &Snapshot) -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(
+            snap.raw.failover.timeouts.connect_seconds,
+        ))
+        .tcp_nodelay(true)
+        .build()
+        .expect("build reqwest client")
 }
 
 impl AppState {
     pub fn new(snap: Snapshot) -> Self {
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(
-                snap.raw.failover.timeouts.connect_seconds,
-            ))
-            .tcp_nodelay(true)
-            .build()
-            .expect("build reqwest client");
         Self {
-            snap: RwLock::new(Arc::new(snap)),
-            client,
+            snap: RwLock::new(Arc::new(snap.clone())),
+            client: mk_client(&snap),
             states: Arc::new(StateTable::new()),
+            usage: None,
+            config_path: None,
         }
+    }
+
+    /// 带用量记账与热重载配置路径的构造（main.rs 与 m3 测试用）。
+    pub fn with_paths(snap: Snapshot, config_path: PathBuf, logs_dir: PathBuf) -> Self {
+        let prices_path = snap.raw.prices.file.clone();
+        let usage = Arc::new(Usage::new(logs_dir, &prices_path));
+        Self {
+            snap: RwLock::new(Arc::new(snap.clone())),
+            client: mk_client(&snap),
+            states: Arc::new(StateTable::new()),
+            usage: Some(usage),
+            config_path: Some(config_path),
+        }
+    }
+}
+
+/// 单次尝试的记账上下文（handle 构造，流式路径克隆进 StreamCtx）。
+struct RecordCtx {
+    usage: Arc<Usage>,
+    agent: String,
+    group: String,
+    provider: String,
+    model: String,
+    retries: u32,
+    t0: Instant,
+}
+
+/// attempt_once 终局响应附带的记账元数据。
+struct RespMeta {
+    status: u16,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    /// true 时由流完成分支记账，handle 不再重复记。
+    streamed: bool,
+    /// fail chain 末段标签，如 "ok"、"400"、"timeout"。
+    chain_entry: String,
+}
+
+/// 流完成时记账（tokens + usage 事件）。
+struct StreamCtx {
+    usage: Arc<Usage>,
+    agent: String,
+    group: String,
+    provider: String,
+    model: String,
+    retries: u32,
+    t0: Instant,
+    /// 流开始时的 chain 快照（不含本次 ":ok" 末段）。
+    chain: Vec<String>,
+}
+
+fn finish_stream(st_tbl: &StateTable, pid: &str, acc: &UsageAcc, ctx: Option<&StreamCtx>) {
+    let now = now_epoch_secs();
+    st_tbl.add_tokens(pid, acc.total, now);
+    if let Some(c) = ctx {
+        let mut fail_chain = c.chain.clone();
+        fail_chain.push(format!("{}:ok", c.provider));
+        c.usage.record(&Event {
+            ts: now,
+            agent: c.agent.clone(),
+            group: c.group.clone(),
+            provider: c.provider.clone(),
+            model: c.model.clone(),
+            status: 200,
+            prompt_tokens: acc.pt,
+            completion_tokens: acc.ct,
+            cost_est: c.usage.cost(&c.model, acc.pt, acc.ct),
+            duration_ms: c.t0.elapsed().as_millis() as u64,
+            retries: c.retries,
+            fail_chain,
+        });
     }
 }
 
@@ -77,6 +164,7 @@ struct Outbound {
 
 /// 主转发入口：候选循环故障转移。
 pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
+    let t0 = Instant::now();
     let snap = state.snap.read().await.clone();
     let (parts, body) = req.into_parts();
     let (method, headers, uri) = (parts.method, parts.headers, parts.uri);
@@ -102,7 +190,7 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
         None => return json_error(400, "请求缺少 model 字段（OpenAI 兼容）"),
     };
     // 解析路由组与候选（disabled 已在 resolve 过滤）
-    let (_group, candidates) = match router::resolve(&snap, &agent_id, &model) {
+    let (group, candidates) = match router::resolve(&snap, &agent_id, &model) {
         Ok(v) => v,
         Err(e) => return json_error(e.status(), &e.to_string()),
     };
@@ -145,8 +233,12 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
     let fo = &snap.raw.failover;
     let max_attempts = 1 + fo.max_retries as usize;
     let mut last_err: Option<(u16, String)> = None;
+    let mut attempts = 0u32;
+    let mut last_prov: Option<(String, String)> = None;
 
     for (c, p) in avail.into_iter().take(max_attempts) {
+        attempts += 1;
+        last_prov = Some((p.id.clone(), c.model.clone()));
         // 上游 model 可能被 group/ 虚拟模型改写为成员自己的 model
         let mut outbound_json = parsed.clone();
         outbound_json["model"] = serde_json::Value::String(c.model.clone());
@@ -159,8 +251,42 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
             headers: base_headers.clone(),
             body: out_body,
         };
-        match attempt_once(&state, &snap, p, ob, &chain).await {
-            Ok(resp) => return resp,
+        let rec = state.usage.as_ref().map(|u| RecordCtx {
+            usage: u.clone(),
+            agent: agent_id.clone(),
+            group: group.clone(),
+            provider: p.id.clone(),
+            model: c.model.clone(),
+            retries: attempts - 1,
+            t0,
+        });
+        match attempt_once(&state, &snap, p, ob, &chain, rec.as_ref()).await {
+            Ok((resp, meta)) => {
+                // 非流式终局在此记账；流式由流完成分支记账（streamed=true）
+                if let (Some(rec), false) = (&rec, meta.streamed) {
+                    let mut fail_chain = chain.clone();
+                    fail_chain.push(format!("{}:{}", rec.provider, meta.chain_entry));
+                    rec.usage.record(&Event {
+                        ts: now_epoch_secs(),
+                        agent: rec.agent.clone(),
+                        group: rec.group.clone(),
+                        provider: rec.provider.clone(),
+                        model: rec.model.clone(),
+                        status: meta.status,
+                        prompt_tokens: meta.prompt_tokens,
+                        completion_tokens: meta.completion_tokens,
+                        cost_est: rec.usage.cost(
+                            &rec.model,
+                            meta.prompt_tokens,
+                            meta.completion_tokens,
+                        ),
+                        duration_ms: t0.elapsed().as_millis() as u64,
+                        retries: rec.retries,
+                        fail_chain,
+                    });
+                }
+                return resp;
+            }
             Err(fail) => {
                 chain.push(format!("{}:{}", p.id, fail.tag));
                 let now2 = now_epoch_secs();
@@ -188,8 +314,25 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
         }
     }
 
-    // 候选耗尽：返回最后一次错误
+    // 候选耗尽：返回最后一次错误，并记一条失败事件（tokens 0）
     let (status, msg) = last_err.unwrap_or((502, "故障转移候选全部失败".to_string()));
+    if let Some(u) = &state.usage {
+        let (provider, mdl) = last_prov.unwrap_or_else(|| (String::new(), String::new()));
+        u.record(&Event {
+            ts: now_epoch_secs(),
+            agent: agent_id,
+            group,
+            provider,
+            model: mdl,
+            status,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cost_est: None,
+            duration_ms: t0.elapsed().as_millis() as u64,
+            retries: attempts.saturating_sub(1),
+            fail_chain: chain.clone(),
+        });
+    }
     let mut resp = json_error(status, &msg);
     attach_chain(&mut resp, &chain.join(","));
     resp
@@ -202,7 +345,8 @@ async fn attempt_once(
     p: &Provider,
     ob: Outbound,
     chain: &[String],
-) -> Result<Response<Body>, AttemptFail> {
+    rec: Option<&RecordCtx>,
+) -> Result<(Response<Body>, RespMeta), AttemptFail> {
     let fo = &snap.raw.failover;
 
     // 鉴权：从环境变量取 key，替换 Authorization；缺失按 degraded 处理
@@ -252,7 +396,16 @@ async fn attempt_once(
             }
             let mut r = json_error(504, &msg);
             attach_chain(&mut r, &chain_line(chain, &p.id, "timeout"));
-            return Ok(r);
+            return Ok((
+                r,
+                RespMeta {
+                    status: 504,
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    streamed: false,
+                    chain_entry: "timeout".into(),
+                },
+            ));
         }
         Ok(Err(e)) => {
             let msg = format!("上游请求失败: {e}");
@@ -265,7 +418,16 @@ async fn attempt_once(
             }
             let mut r = json_error(502, &msg);
             attach_chain(&mut r, &chain_line(chain, &p.id, "conn"));
-            return Ok(r);
+            return Ok((
+                r,
+                RespMeta {
+                    status: 502,
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    streamed: false,
+                    chain_entry: "conn".into(),
+                },
+            ));
         }
         Ok(Ok(r)) => r,
     };
@@ -286,10 +448,9 @@ async fn attempt_once(
                 state,
                 p,
                 resp,
-                &ctype,
-                status,
                 chain,
                 Duration::from_secs(fo.timeouts.stream_idle_seconds),
+                rec,
             )
             .await;
         }
@@ -306,9 +467,9 @@ async fn attempt_once(
         };
         let now = now_epoch_secs();
         state.states.record_success(&p.id, now);
-        let tokens = usage_tokens_json(&bytes);
-        if tokens > 0 {
-            state.states.add_tokens(&p.id, tokens, now);
+        let (pt, ct, total) = usage_tokens_json(&bytes);
+        if total > 0 {
+            state.states.add_tokens(&p.id, total, now);
         }
         let mut r = Response::new(Body::from(bytes));
         *r.status_mut() = status;
@@ -316,7 +477,16 @@ async fn attempt_once(
             r.headers_mut().insert(header::CONTENT_TYPE, v);
         }
         attach_chain(&mut r, &chain_line(chain, &p.id, "ok"));
-        return Ok(r);
+        return Ok((
+            r,
+            RespMeta {
+                status: code,
+                prompt_tokens: pt,
+                completion_tokens: ct,
+                streamed: false,
+                chain_entry: "ok".into(),
+            },
+        ));
     }
 
     if code == 401 || code == 403 {
@@ -347,7 +517,16 @@ async fn attempt_once(
     // 不可重试的上游错误（如 400）：原样透传，换供应商也无意义
     let mut r = passthrough_buffered(resp, status, &ctype).await;
     attach_chain(&mut r, &chain_line(chain, &p.id, &code.to_string()));
-    Ok(r)
+    Ok((
+        r,
+        RespMeta {
+            status: code,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            streamed: false,
+            chain_entry: code.to_string(),
+        },
+    ))
 }
 
 /// 流式尝试：peek 首 chunk 判定，成功则零缓冲透传并在完成时记账 usage。
@@ -356,11 +535,17 @@ async fn stream_attempt(
     state: &Arc<AppState>,
     p: &Provider,
     resp: reqwest::Response,
-    ctype: &str,
-    status: StatusCode,
     chain: &[String],
     idle: Duration,
-) -> Result<Response<Body>, AttemptFail> {
+    rec: Option<&RecordCtx>,
+) -> Result<(Response<Body>, RespMeta), AttemptFail> {
+    let status = resp.status();
+    let ctype = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let mut stream = resp.bytes_stream();
 
     let first = match tokio::time::timeout(idle, stream.next()).await {
@@ -401,49 +586,76 @@ async fn stream_attempt(
     state.states.record_success(&p.id, now);
     let st_tbl = state.states.clone();
     let pid = p.id.clone();
+    let ctx = rec.map(|r| {
+        Arc::new(StreamCtx {
+            usage: r.usage.clone(),
+            agent: r.agent.clone(),
+            group: r.group.clone(),
+            provider: r.provider.clone(),
+            model: r.model.clone(),
+            retries: r.retries,
+            t0: r.t0,
+            chain: chain.to_vec(),
+        })
+    });
+    let (p0, c0, t0) = usage_tokens_sse(&first);
     let init = UsageAcc {
-        total: usage_tokens_sse(&first),
+        pt: p0,
+        ct: c0,
+        total: t0,
     };
-    let rest = futures_util::stream::unfold((Some(stream), init), move |(opt, mut acc)| {
-        let st_tbl = st_tbl.clone();
-        let pid = pid.clone();
-        async move {
-            let mut s = opt?;
-            match tokio::time::timeout(idle, s.next()).await {
-                Ok(Some(Ok(b))) => {
-                    acc.add(usage_tokens_sse(&b));
-                    Some((Ok::<Bytes, BoxError>(b), (Some(s), acc)))
-                }
-                Ok(Some(Err(e))) => {
-                    st_tbl.add_tokens(&pid, acc.total, now_epoch_secs());
-                    Some((Err::<Bytes, BoxError>(Box::new(e)), (None, acc)))
-                }
-                Ok(None) => {
-                    st_tbl.add_tokens(&pid, acc.total, now_epoch_secs());
-                    None
-                }
-                Err(_) => {
-                    st_tbl.add_tokens(&pid, acc.total, now_epoch_secs());
-                    Some((
-                        Err::<Bytes, BoxError>(Box::from("buffet: 上游流静默超时")),
-                        (None, acc),
-                    ))
+    let rest =
+        futures_util::stream::unfold((Some(stream), init, ctx), move |(opt, mut acc, ctx)| {
+            let st_tbl = st_tbl.clone();
+            let pid = pid.clone();
+            let ctx = ctx.clone();
+            async move {
+                let mut s = opt?;
+                match tokio::time::timeout(idle, s.next()).await {
+                    Ok(Some(Ok(b))) => {
+                        let (p, c, t) = usage_tokens_sse(&b);
+                        acc.add(p, c, t);
+                        Some((Ok::<Bytes, BoxError>(b), (Some(s), acc, ctx)))
+                    }
+                    Ok(Some(Err(e))) => {
+                        finish_stream(&st_tbl, &pid, &acc, ctx.as_deref());
+                        Some((Err::<Bytes, BoxError>(Box::new(e)), (None, acc, ctx)))
+                    }
+                    Ok(None) => {
+                        finish_stream(&st_tbl, &pid, &acc, ctx.as_deref());
+                        None
+                    }
+                    Err(_) => {
+                        finish_stream(&st_tbl, &pid, &acc, ctx.as_deref());
+                        Some((
+                            Err::<Bytes, BoxError>(Box::from("buffet: 上游流静默超时")),
+                            (None, acc, ctx),
+                        ))
+                    }
                 }
             }
-        }
-    });
+        });
 
     let combined =
         futures_util::stream::once(async move { Ok::<Bytes, BoxError>(first) }).chain(rest);
     let mut r = Response::new(Body::from_stream(combined));
     *r.status_mut() = status;
-    if let Ok(v) = HeaderValue::from_str(ctype) {
+    if let Ok(v) = HeaderValue::from_str(&ctype) {
         r.headers_mut().insert(header::CONTENT_TYPE, v);
     }
     r.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     attach_chain(&mut r, &chain_line(chain, &p.id, "ok"));
-    Ok(r)
+    Ok((
+        r,
+        RespMeta {
+            status: status.as_u16(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            streamed: true,
+            chain_entry: "ok".into(),
+        },
+    ))
 }
 
 async fn passthrough_buffered(
@@ -510,36 +722,39 @@ fn parse_retry_after(resp: &reqwest::Response) -> Option<u64> {
         .and_then(|s| s.trim().parse::<u64>().ok())
 }
 
-/// 非流式响应 usage 记账：total_tokens 优先，否则 prompt+completion。
-fn usage_tokens_json(bytes: &[u8]) -> u64 {
+/// 非流式响应 usage 记账：返回 (prompt, completion, total)，total 优先取 total_tokens。
+fn usage_tokens_json(bytes: &[u8]) -> (u64, u64, u64) {
     serde_json::from_slice::<serde_json::Value>(bytes)
         .ok()
         .map(|v| usage_from_value(&v))
-        .unwrap_or(0)
+        .unwrap_or((0, 0, 0))
 }
 
-fn usage_from_value(v: &serde_json::Value) -> u64 {
+fn usage_from_value(v: &serde_json::Value) -> (u64, u64, u64) {
     let Some(u) = v.get("usage") else {
-        return 0;
+        return (0, 0, 0);
     };
-    if let Some(t) = u.get("total_tokens").and_then(|x| x.as_u64()) {
-        return t;
-    }
     let p = u.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
     let c = u
         .get("completion_tokens")
         .and_then(|x| x.as_u64())
         .unwrap_or(0);
-    p + c
+    let t = u
+        .get("total_tokens")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(p + c);
+    (p, c, t)
 }
 
 /// 流式末块 usage 记账：仅当 chunk 含 "usage" 字样才逐行解析。
-fn usage_tokens_sse(chunk: &Bytes) -> u64 {
+fn usage_tokens_sse(chunk: &Bytes) -> (u64, u64, u64) {
     if chunk.len() < 5 || !chunk.windows(5).any(|w| w == b"usage") {
-        return 0;
+        return (0, 0, 0);
     }
     let text = String::from_utf8_lossy(chunk);
-    let mut sum = 0u64;
+    let mut sp = 0u64;
+    let mut sc = 0u64;
+    let mut st = 0u64;
     for line in text.lines() {
         if let Some(payload) = line.strip_prefix("data:") {
             let payload = payload.trim();
@@ -547,11 +762,14 @@ fn usage_tokens_sse(chunk: &Bytes) -> u64 {
                 continue;
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
-                sum += usage_from_value(&v);
+                let (p, c, t) = usage_from_value(&v);
+                sp += p;
+                sc += c;
+                st += t;
             }
         }
     }
-    sum
+    (sp, sc, st)
 }
 
 /// base_url 已含 /v1；upstream_rel 为去掉前导 v1/ 后的路径。

@@ -188,6 +188,16 @@ impl StateTable {
     pub fn tokens_used(&self, id: &str, now: u64) -> u64 {
         self.with_state(id, now, |st| st.tokens_used)
     }
+
+    /// 热重载后复位：清 degraded / 熔断 / 连续失败窗口，保留额度记账（tokens_used/tighten）。
+    pub fn reset(&self) {
+        let mut g = self.inner.lock().unwrap();
+        for st in g.values_mut() {
+            st.degraded = false;
+            st.open_until = None;
+            st.fail_times.clear();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -318,5 +328,21 @@ mod tests {
             t.availability("p", &p, 0.8, now),
             Err(Unavailable::QuotaExhausted { .. })
         ));
+    }
+
+    #[test]
+    fn reset_clears_degraded_and_circuit_but_keeps_quota() {
+        let t = StateTable::new();
+        let p = prov(Some(1000));
+        let c = cb();
+        let now = 1_000_000;
+        t.mark_degraded("p", now);
+        t.record_failure("p", &c, now);
+        t.add_tokens("p", 700, day_of(1_000_000) * 86_400 + 100);
+        t.reset();
+        // degraded 与熔断清零
+        assert!(t.availability("p", &p, 0.8, now + 1).is_ok());
+        // 额度记账保留
+        assert_eq!(t.tokens_used("p", day_of(1_000_000) * 86_400 + 100), 700);
     }
 }
