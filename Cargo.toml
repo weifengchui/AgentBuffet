@@ -1,0 +1,28 @@
+[package]
+name = "buffetd"
+version = "0.1.0"
+edition = "2021"
+description = "AgentBuffet（Agent食堂）—— 极低功耗 AI 模型 API 网关"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+bytes = "1"
+futures-util = "0.3"
+http = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true
+
+[lib]
+name = "agentbuffet"
+path = "src/lib.rs"
