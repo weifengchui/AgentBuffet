@@ -26,7 +26,7 @@ if command -v zig >/dev/null 2>&1 || [ -x /tmp/opencode/zig14/zig ]; then
   mkdir -p "$DIST/agentbuffet-windows-x86_64"
   cp "$CARGO_TARGET_DIR/$WIN_T/release/buffetd.exe" "$DIST/agentbuffet-windows-x86_64/"
   cp README.md "$DIST/agentbuffet-windows-x86_64/" 2>/dev/null || true
-  (cd "$DIST" && zip -qr agentbuffet-windows-x86_64.zip agentbuffet-windows-x86_64)
+  (cd "$DIST" && python3 -m zipfile -c agentbuffet-windows-x86_64.zip agentbuffet-windows-x86_64)
 else
   echo "跳过：未找到 zig（cargo-zigbuild 依赖）。安装 zig 后重跑本脚本即可产出 Windows 版。"
 fi
