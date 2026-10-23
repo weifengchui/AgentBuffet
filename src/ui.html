@@ -543,6 +543,8 @@ const PCOL = { ok: "#3fb950", degraded: "#f85149", circuit_open: "#d29922", quot
 let mapTimer = null, mapFired = new Set(), mapLive = {}, mapNodes = null, mapStars = false;
 const photons = []; let phRaf = null;
 const hashK = (s) => { let h = 17; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 2654435761); return Math.abs(h); };
+const PAL = ["#38d6e6", "#c77dff", "#43d97b", "#ffb347", "#7fb0ff", "#ff5c7a", "#3fd0a0", "#f97fd0", "#9d7bff", "#5cc8ff"];
+const palOf = (s) => PAL[hashK(String(s)) % PAL.length];
 const ctrl = (p1, p2, k) => { const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2, dx = p2.x - p1.x, dy = p2.y - p1.y, L = Math.hypot(dx, dy) || 1, bow = 24 + (hashK(k) % 20); return { x: mx + (-dy / L) * bow, y: my + (dx / L) * bow }; };
 const chanD = (p1, c, p2) => `M ${p1.x} ${p1.y} Q ${c.x} ${c.y} ${p2.x} ${p2.y}`;
 const qp = (p1, c, p2, u) => { const it = 1 - u; return { x: it * it * p1.x + 2 * it * u * c.x + u * u * p2.x, y: it * it * p1.y + 2 * it * u * c.y + u * u * p2.y }; };
@@ -573,24 +575,24 @@ function drawMap(agents, groups, providers, recent) {
   let h = "";
   const link = (k1, k2, col) => { const p1 = pos[k1], p2 = pos[k2], key = k1 + "=>" + k2;
     return `<path class="lk${mapLive[key] ? " live" : ""}" data-k="${key}" d="${chanD(p1, ctrl(p1, p2, key), p2)}" stroke="${col}"/>`; };
-  for (const a of agents) h += link("ag:" + a.agent_id, "gw", "#38d6e6");
-  for (const x of pvs) h += link("gw", "pv:" + x.id, PCOL[x.status] || "#50607a");
+  for (const a of agents) h += link("ag:" + a.agent_id, "gw", palOf(a.agent_id));
+  for (const x of pvs) h += link("gw", "pv:" + x.id, palOf(x.id));
   h += `<g><circle cx="${cx}" cy="${cy}" r="30" fill="rgba(79,140,255,.08)" stroke="rgba(127,176,255,.35)"/>
     <circle cx="${cx}" cy="${cy}" r="18" fill="#101a2e" stroke="#7fb0ff" stroke-width="1.5"/>
     <circle cx="${cx}" cy="${cy}" r="5" fill="#4f8cff"><animate attributeName="opacity" values="1;.35;1" dur="2.6s" repeatCount="indefinite"/></circle>
     <text class="mlab" x="${cx}" y="${cy+48}">Gateway</text></g>`;
   for (const a of agents) {
-    const p = pos["ag:" + a.agent_id], col = a.drifted ? "#d29922" : "#38d6e6";
+    const p = pos["ag:" + a.agent_id], col = palOf(a.agent_id);
     const nm = a.agent_id.length > 11 ? a.agent_id.slice(0, 10) + "…" : a.agent_id;
-    h += `<g><rect x="${p.x-54}" y="${p.y-13}" width="108" height="26" rx="13" fill="#13233a" stroke="${col}" stroke-width="1.2"/>
+    h += `<g><rect x="${p.x-54}" y="${p.y-13}" width="108" height="26" rx="13" fill="#13233a" stroke="${col}" stroke-width="1.2"${a.drifted ? ' stroke-dasharray="4 3"' : ""}/>
       <text x="${p.x}" y="${p.y+4}" text-anchor="middle" fill="#dcecf8" font-size="11.5">${esc(nm)}</text>
       <title>${esc(a.agent_id)} · ${esc(a.default_group || "-")}${a.drifted ? " · " + esc(L("漂移", "drifted")) : ""}</title></g>`;
   }
   for (const q of pvs) {
-    const p = pos["pv:" + q.id], col = PCOL[q.status] || "#50607a";
+    const p = pos["pv:" + q.id], col = palOf(q.id), scol = PCOL[q.status] || "#50607a";
     const nm = q.id.length > 12 ? q.id.slice(0, 11) + "…" : q.id;
     h += `<g><circle cx="${p.x}" cy="${p.y}" r="12" fill="#0d1522" stroke="${col}" stroke-width="1.6"/>
-      <circle cx="${p.x}" cy="${p.y}" r="4" fill="${col}"/>
+      <circle cx="${p.x}" cy="${p.y}" r="4" fill="${scol}"/>
       <text class="mlab" x="${p.x}" y="${p.y+28}">${esc(nm)}</text>
       <title>${esc(q.id)} · ${esc(stLabel(q.status))}</title></g>`;
   }
@@ -599,8 +601,8 @@ function drawMap(agents, groups, providers, recent) {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = h;
   const ph = $("ph"); for (const e of photons) ph.appendChild(e.el);
-  $("ov-map-lg").innerHTML = [["#38d6e6", L("活跃链路", "live link")], ["#3fb950", L("服务商正常", "provider ok")],
-    ["#d29922", L("熔断 / 额度", "circuit / quota")], ["#f85149", L("降级", "degraded")], ["#50607a", L("停用", "disabled")]]
+  $("ov-map-lg").innerHTML = `<span class="lgd">${esc(L("节点颜色区分身份；服务商内芯色表示状态：", "Node colors identify nodes; provider core colors show status:"))}</span>` +
+    [["#3fb950", L("正常", "ok")], ["#d29922", L("熔断 / 额度", "circuit / quota")], ["#f85149", L("降级", "degraded")], ["#50607a", L("停用", "disabled")]]
     .map(([c, t2]) => `<span class="lgd"><i style="background:${c}"></i>${esc(t2)}</span>`).join("");
   for (const e of recent) {
     const key = `${e.ts}|${e.agent}|${e.provider}|${e.model}`;
@@ -612,17 +614,18 @@ function drawMap(agents, groups, providers, recent) {
     const lk1 = k1 + "=>gw", lk2 = "gw=>" + k2;
     mapLive[lk1] = now + 60; mapLive[lk2] = now + 60;
     for (const k of [lk1, lk2]) { const el = svg.querySelector(`[data-k="${CSS.escape(k)}"]`); if (el) el.classList.add("live"); }
-    spawnPhoton(pos[k1], pos[k2], e.status < 400 ? "#38d6e6" : "#f85149", lk1, lk2);
+    spawnPhoton(pos[k1], pos[k2], palOf(e.agent), palOf(e.provider), e.status < 400 ? null : "#f85149", lk1, lk2);
   }
   if (mapFired.size > 500) mapFired.clear();
 }
-function spawnPhoton(a, b, color, k1, k2) {
+function spawnPhoton(a, b, col1, col2, bad, k1, k2) {
   const ph = $("ph"), g = mapNodes && mapNodes.gw; if (!ph || !g) return;
   const el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   el.setAttribute("r", "3.5"); el.setAttribute("fill", "#fff");
-  el.style.filter = `drop-shadow(0 0 5px ${color}) drop-shadow(0 0 11px ${color})`;
+  const glow = (c) => `drop-shadow(0 0 5px ${c}) drop-shadow(0 0 11px ${c})`;
+  el.style.filter = glow(bad || col1);
   ph.appendChild(el);
-  photons.push({ el, a, g, b, c1: ctrl(a, g, k1), c2: ctrl(g, b, k2), t0: performance.now(), dur: 1600 });
+  photons.push({ el, glow, a, g, b, c1: ctrl(a, g, k1), c2: ctrl(g, b, k2), t0: performance.now(), dur: 1600, col1, col2, bad, seg: 0 });
   if (!phRaf) phTick();
 }
 function phTick() {
@@ -630,6 +633,8 @@ function phTick() {
   for (let i = photons.length - 1; i >= 0; i--) {
     const p = photons[i], u = (t - p.t0) / p.dur;
     if (u >= 1) { p.el.remove(); photons.splice(i, 1); continue; }
+    const seg = u < 0.5 ? 0 : 1;
+    if (p.seg !== seg) { p.seg = seg; p.el.style.filter = p.glow(p.bad || (seg ? p.col2 : p.col1)); }
     const pt = u < 0.5 ? qp(p.a, p.c1, p.g, u * 2) : qp(p.g, p.c2, p.b, (u - 0.5) * 2);
     p.el.setAttribute("cx", pt.x); p.el.setAttribute("cy", pt.y);
   }
