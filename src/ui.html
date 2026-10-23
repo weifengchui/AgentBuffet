@@ -48,9 +48,11 @@ nav button svg { width: 16px; height: 16px; flex: 0 0 auto; }
   padding: 6px 0; border-radius: 8px; cursor: pointer; font: inherit; }
 .side-foot button:hover { color: var(--text); border-color: #2a3548; }
 body.sb-collapsed aside { width: 62px; }
-body.sb-collapsed .logo .word, body.sb-collapsed .logo .ver,
-body.sb-collapsed nav button span, body.sb-collapsed nav button { justify-content: center; }
-body.sb-collapsed nav button { padding: 9px 0; }
+body.sb-collapsed .logo { justify-content: center; padding-left: 0; padding-right: 0; }
+body.sb-collapsed .logo .word, body.sb-collapsed .logo .ver { display: none; }
+body.sb-collapsed nav button { justify-content: center; padding: 9px 0; }
+body.sb-collapsed nav button span { display: none; }
+body.sb-collapsed .side-foot { justify-content: center; }
 
 /* ---------------- topbar / main ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -431,6 +433,7 @@ const L = (zh, en) => lang === "zh" ? zh : en;
 function applyLang() {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll("#nav button span[data-i18n]").forEach(el => { el.closest("button").title = el.textContent; });
   document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
   $("lang-btn").textContent = lang === "zh" ? "EN" : "中";
   $("tb-title").textContent = t("nav." + curView);
@@ -908,14 +911,18 @@ function wireMemberRows() {
       rows.splice(ti, 0, rows.splice(fi, 1)[0]);
       const members = rows.map((r, i) => ({ provider: r.dataset.p, model: r.dataset.m, priority: i + 1 }));
       try {
-        await post("/_admin/routing", { group: row.dataset.g, members });
-        toast(L("优先级顺序已保存并热重载", "Priority order saved & hot-reloaded"), "ok");
+        const j = await post("/_admin/routing", { group: row.dataset.g, members });
+        toast(L("优先级顺序已保存并热重载", "Priority order saved & hot-reloaded") + agentRefreshedNote(j), "ok");
       } catch (err) { toast(err.message, "bad"); }
       loadRouting();
     };
   });
 }
 
+function agentRefreshedNote(j) {
+  const n = j && j.agents_refreshed ? j.agents_refreshed.length : 0;
+  return n ? L(`，已自动刷新 ${n} 个接入器配置`, ` · ${n} agent config(s) refreshed`) : "";
+}
 function wireGroupDrag() {
   const grid = $("rt-grid"); if (!grid) return;
   let dragEl = null;
@@ -1023,8 +1030,8 @@ async function openGroup(name) {
     }
     $("gm-ok").disabled = true;
     try {
-      await post("/_admin/group", { name: gname, members: gm.map(r => ({ provider: r.provider, model: String(r.model).trim(), priority: 1 })) });
-      closeModal(); toast(L("路由组已保存并热重载", "Group saved & hot-reloaded"), "ok"); loadRouting();
+      const j = await post("/_admin/group", { name: gname, members: gm.map(r => ({ provider: r.provider, model: String(r.model).trim(), priority: 1 })) });
+      closeModal(); toast(L("路由组已保存并热重载", "Group saved & hot-reloaded") + agentRefreshedNote(j), "ok"); loadRouting();
     } catch (err) { toast(err.message, "bad"); $("gm-ok").disabled = false; }
   };
 }
@@ -1033,8 +1040,8 @@ async function delGroup(name) {
     L(`确定删除路由组 ${name}？引用它的 Agent 默认组会校验失败，请先调整。`,
       `Delete group ${name}? Agents pointing at it will fail validation — reassign first.`))) return;
   try {
-    await post("/_admin/group/delete", { name });
-    toast(L("已删除 ", "Deleted ") + name, "ok"); loadRouting();
+    const j = await post("/_admin/group/delete", { name });
+    toast(L("已删除 ", "Deleted ") + name + agentRefreshedNote(j), "ok"); loadRouting();
   } catch (err) { toast(err.message, "bad"); }
 }
 

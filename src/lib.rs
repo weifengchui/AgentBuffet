@@ -465,6 +465,21 @@ async fn do_reload(st: &proxy::AppState) -> (StatusCode, serde_json::Value) {
     };
     *st.snap.write().await = Arc::new(snap.clone());
     st.states.reset();
+    // 热重载后自动重写已接入但漂移的 Agent 配置（如路由组增删模型后需重新枚举）
+    let mut refreshed: Vec<String> = Vec::new();
+    for t in agent_targets(&snap) {
+        let a = onboard::Adapter::for_agent(&t.agent_id);
+        if !matches!(
+            a,
+            onboard::Adapter::OpenCode | onboard::Adapter::Codex | onboard::Adapter::Hermes
+        ) {
+            continue;
+        }
+        let d = onboard::detect(&st.home, &t);
+        if d.attached && d.drifted && onboard::apply(&st.home, &t).is_ok() {
+            refreshed.push(t.agent_id.clone());
+        }
+    }
     let mut w = warnings;
     if let Some(u) = &st.usage {
         let (prices, warn) = usage::load_prices(&snap.raw.prices.file);
@@ -479,6 +494,7 @@ async fn do_reload(st: &proxy::AppState) -> (StatusCode, serde_json::Value) {
             "status": "reloaded",
             "addr_changed": addr_changed,
             "warnings": w,
+            "agents_refreshed": refreshed,
         }),
     )
 }

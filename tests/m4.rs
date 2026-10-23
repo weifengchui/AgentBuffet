@@ -547,6 +547,70 @@ async fn routing_group_order_persists_and_views() {
 }
 
 #[tokio::test]
+async fn routing_edit_refreshes_drifted_agent_config() {
+    let (st, _dir) = state_for("refresh", temp_dir("refresh-home"));
+    // 预置 OpenCode 配置文件（apply 只改写已存在的配置）
+    let oc = st.home.join(".config/opencode");
+    std::fs::create_dir_all(&oc).unwrap();
+    std::fs::write(
+        oc.join("opencode.json"),
+        "{\"$schema\": \"https://opencode.ai/config.json\"}",
+    )
+    .unwrap();
+    // 以旧模型清单（仅 m1）接入 opencode → 相对当前配置（m1+m2）处于漂移
+    let old = onboard::Target {
+        agent_id: "opencode".into(),
+        default_group: "g".into(),
+        groups: vec!["g".into()],
+        models: vec!["m1".into()],
+        gateway_addr: "127.0.0.1:9".into(),
+    };
+    onboard::apply(&st.home, &old).expect("attach ok");
+
+    // 编辑路由组成员 → 热重载应自动重写漂移的接入器配置
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/routing",
+        Some(serde_json::json!({
+            "group": "g",
+            "members": [
+                {"provider": "p1", "model": "m1", "priority": 1},
+                {"provider": "p2", "model": "m2", "priority": 2}
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    let refreshed = j["agents_refreshed"].as_array().unwrap();
+    assert!(refreshed.iter().any(|x| x == "opencode"), "{j}");
+
+    // 配置文件中已重新枚举 m2
+    let p = st.home.join(".config/opencode/opencode.json");
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("m2"), "{text}");
+
+    // 再次编辑（无漂移）→ 不重复重写
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/routing",
+        Some(serde_json::json!({
+            "group": "g",
+            "members": [
+                {"provider": "p1", "model": "m1", "priority": 1},
+                {"provider": "p2", "model": "m2", "priority": 2}
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    assert!(j["agents_refreshed"].as_array().unwrap().is_empty(), "{j}");
+}
+
+#[tokio::test]
 async fn routing_test_endpoint_hits_upstream_models() {
     // mock 上游：GET /v1/models → 200
     let app = axum::Router::new().route(
