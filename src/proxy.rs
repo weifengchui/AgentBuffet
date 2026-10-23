@@ -43,6 +43,8 @@ pub struct AppState {
     pub config_path: Option<PathBuf>,
     /// 接入器读写 Agent 配置文件所用的用户主目录。
     pub home: PathBuf,
+    /// API Key 存放的 env 文件（与 systemd EnvironmentFile 同一约定）。
+    pub env_file: PathBuf,
 }
 
 fn mk_client(snap: &Snapshot) -> reqwest::Client {
@@ -55,6 +57,15 @@ fn mk_client(snap: &Snapshot) -> reqwest::Client {
         .expect("build reqwest client")
 }
 
+/// env 文件默认路径：`$AGENTBUFFET_HOME/env`，否则 `~/.agentbuffet/env`。
+pub fn default_env_file() -> PathBuf {
+    if let Ok(h) = std::env::var("AGENTBUFFET_HOME") {
+        PathBuf::from(h).join("env")
+    } else {
+        crate::onboard::home_dir().join(".agentbuffet").join("env")
+    }
+}
+
 impl AppState {
     pub fn new(snap: Snapshot) -> Self {
         Self {
@@ -64,6 +75,7 @@ impl AppState {
             usage: None,
             config_path: None,
             home: crate::onboard::home_dir(),
+            env_file: default_env_file(),
         }
     }
 
@@ -78,6 +90,7 @@ impl AppState {
             usage: Some(usage),
             config_path: Some(config_path),
             home: crate::onboard::home_dir(),
+            env_file: default_env_file(),
         }
     }
 }

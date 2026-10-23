@@ -1,4 +1,4 @@
-# AgentBuffet（Agent食堂）
+# AgentBuffet
 
 极低功耗的本地 AI 模型 API 网关：一个 `buffetd` 二进制，把多家模型供应商聚合成统一入口，为每个 Agent 提供按优先级自动故障转移的"自助餐台"。空闲 CPU < 0.5%、常驻内存 < 30MB。
 
@@ -9,7 +9,7 @@
 - **故障转移**：组内按 priority 依次尝试；熔断（滑动窗口）、额度软上限、429 被动校准、首 chunk 错误切换。
 - **零缓冲 SSE 透传**：流式响应逐 chunk 转发，不聚合、不等待。
 - **接入器**：一条命令把 OpenCode / Codex 配置注入网关（写入前备份，卸载逐字节还原；真实 Key 永不落 Agent 配置）。
-- **Web UI**：四视图（总览 / Providers / Routing / Agents），仅监听 loopback。
+- **Web UI**：五视图（概览 / 服务商 / 路由 / 接入器 / 配置），中英双语界面，仅监听 loopback；配置视图支持按厂商+套餐快捷添加（只需粘贴 API Key）与整份 YAML 导入导出。
 
 ## 快速开始
 

@@ -7,6 +7,7 @@ pub mod onboard;
 pub mod proxy;
 pub mod router;
 pub mod usage;
+pub mod vendors;
 
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Json, Path as AxPath, Request, State};
@@ -42,7 +43,9 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
         .route("/api/routing", get(routing_view))
         .route("/api/agents", get(agents_view))
         .route("/api/config", get(config_get))
+        .route("/api/vendor-catalog", get(vendor_catalog))
         .route("/_admin/config", post(config_import))
+        .route("/_admin/provider", post(provider_add))
         .route("/api/agents/attach", post(agent_attach))
         .route("/api/agents/detach", post(agent_detach))
         .route("/_admin/reload", post(reload))
@@ -615,6 +618,202 @@ async fn config_import(
         );
     }
     let (code, payload) = do_reload(&st).await;
+    json_response(code, payload)
+}
+
+// ---------------------------------------------------------------- 厂商快捷添加
+
+/// 厂商目录（UI 下拉数据源）：静态数据，见 `vendors` 模块。
+async fn vendor_catalog(ConnectInfo(peer): ConnectInfo<SocketAddr>) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    json_response(
+        StatusCode::OK,
+        serde_json::to_value(vendors::catalog()).unwrap_or_else(|_| serde_json::json!([])),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct ProviderAdd {
+    vendor: String,
+    plan: String,
+    api_key: String,
+}
+
+/// 把 `NAME=VALUE` 写入 env 文件（systemd EnvironmentFile 格式），同名行替换。
+fn write_env_key(path: &std::path::Path, name: &str, value: &str) -> std::io::Result<()> {
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let line = format!("{name}={value}");
+    let mut out: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for l in text.lines() {
+        match l.split_once('=') {
+            Some((k, _)) if k.trim() == name => {
+                out.push(line.clone());
+                replaced = true;
+            }
+            _ => out.push(l.to_string()),
+        }
+    }
+    if !replaced {
+        out.push(line);
+    }
+    std::fs::write(&path, out.join("\n") + "\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn seq_of_strings(v: &[String]) -> serde_yaml::Value {
+    serde_yaml::Value::Sequence(
+        v.iter()
+            .map(|s| serde_yaml::Value::String(s.clone()))
+            .collect(),
+    )
+}
+
+/// 快捷添加 provider（UI Config 视图）：厂商 + 套餐 + Key → 写 config.yaml（追加/更新
+/// provider 条目）+ Key 进 `<home>/env`（0600，绝不进配置）+ 进程环境变量即时生效 → 热重载。
+/// 校验失败 422 不落盘；备份 `.bak` 已存在不覆盖（与 routing_edit 同一范式）。
+async fn provider_add(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<ProviderAdd>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let err =
+        |code: StatusCode, msg: String| json_response(code, serde_json::json!({"error": msg}));
+    let Some(path) = st.config_path.clone() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "无配置文件路径，不支持添加 provider".into(),
+        );
+    };
+    if body.api_key.trim().is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "API Key 不能为空".into());
+    }
+    let Some((pid, plan)) = vendors::lookup(&body.vendor, &body.plan) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("厂商/套餐不存在: {}/{}", body.vendor, body.plan),
+        );
+    };
+    let env_name = vendors::env_name(&pid);
+
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("读取配置失败: {e}"),
+            )
+        }
+    };
+    let mut doc: serde_yaml::Value = match serde_yaml::from_str(&text) {
+        Ok(d) => d,
+        Err(e) => {
+            return json_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": "配置 YAML 解析失败", "details": [e.to_string()]}),
+            )
+        }
+    };
+    match doc.get("providers") {
+        None => doc["providers"] = serde_yaml::Value::Sequence(Vec::new()),
+        Some(v) if v.is_sequence() => {}
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "providers 字段不是列表".into(),
+            )
+        }
+    }
+    let list = doc
+        .get_mut("providers")
+        .and_then(|v| v.as_sequence_mut())
+        .expect("providers 已确认为列表");
+    // 已存在则只更新 base_url/api_key_env/models，保留 quota 等其余字段；否则追加。
+    let mut updated = false;
+    for item in list.iter_mut() {
+        if yaml_str(item, "id").as_deref() == Some(pid.as_str()) {
+            item["base_url"] = serde_yaml::Value::String(plan.base_url.clone());
+            item["api_key_env"] = serde_yaml::Value::String(env_name.clone());
+            item["models"] = seq_of_strings(&plan.models);
+            updated = true;
+        }
+    }
+    if !updated {
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("id".into()),
+            serde_yaml::Value::String(pid.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("vendor".into()),
+            serde_yaml::Value::String(body.vendor.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("base_url".into()),
+            serde_yaml::Value::String(plan.base_url.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("api_key_env".into()),
+            serde_yaml::Value::String(env_name.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("models".into()),
+            seq_of_strings(&plan.models),
+        );
+        list.push(serde_yaml::Value::Mapping(map));
+    }
+
+    let new_text = match serde_yaml::to_string(&doc) {
+        Ok(t) => t,
+        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, format!("序列化失败: {e}")),
+    };
+    let filename = path.display().to_string();
+    if let Err(errs) = config::load_str(&new_text, &filename) {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": "配置校验失败", "details": errs}),
+        );
+    }
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    if !bak.exists() {
+        if let Err(e) = std::fs::copy(&path, &bak) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("备份 {} 失败: {e}", bak.display()),
+            );
+        }
+    }
+    if let Err(e) = std::fs::write(&path, &new_text) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("写入配置失败: {e}"),
+        );
+    }
+    if let Err(e) = write_env_key(&st.env_file, &env_name, body.api_key.trim()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("写入 {} 失败: {e}", st.env_file.display()),
+        );
+    }
+    std::env::set_var(&env_name, body.api_key.trim());
+    let (code, mut payload) = do_reload(&st).await;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("provider".into(), serde_json::json!(pid));
+        obj.insert("api_key_env".into(), serde_json::json!(env_name));
+    }
     json_response(code, payload)
 }
 
