@@ -412,7 +412,9 @@ async fn agents_detect_finds_installed() {
     let (code, j) = call_get(st.clone(), "/api/agents/detect").await;
     assert_eq!(code, StatusCode::OK);
     let arr = j.as_array().unwrap();
-    assert_eq!(arr.len(), 3);
+    assert_eq!(arr.len(), 4);
+    let hm = arr.iter().find(|x| x["agent_id"] == "hermes").unwrap();
+    assert_eq!(hm["adapter"], "hermes");
     let codex = arr.iter().find(|x| x["agent_id"] == "codex").unwrap();
     assert_eq!(codex["installed"], true);
     assert_eq!(codex["in_config"], false);

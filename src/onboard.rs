@@ -53,6 +53,7 @@ impl Target {
 pub enum Adapter {
     OpenCode,
     Codex,
+    Hermes,
     Generic,
     ClaudeCode,
 }
@@ -62,6 +63,7 @@ impl Adapter {
         match self {
             Adapter::OpenCode => "opencode",
             Adapter::Codex => "codex",
+            Adapter::Hermes => "hermes",
             Adapter::Generic => "generic",
             Adapter::ClaudeCode => "claude-code",
         }
@@ -72,6 +74,7 @@ impl Adapter {
         match agent_id {
             "opencode" => Adapter::OpenCode,
             "codex" => Adapter::Codex,
+            "hermes" => Adapter::Hermes,
             "claude-code" => Adapter::ClaudeCode,
             _ => Adapter::Generic,
         }
@@ -82,6 +85,7 @@ impl Adapter {
         match self {
             Adapter::OpenCode => Some(home.join(".config").join("opencode").join("opencode.json")),
             Adapter::Codex => Some(home.join(".codex").join("config.toml")),
+            Adapter::Hermes => Some(home.join(".hermes").join("config.yaml")),
             Adapter::ClaudeCode => Some(home.join(".claude.json")),
             Adapter::Generic => None,
         }
@@ -89,7 +93,7 @@ impl Adapter {
 }
 
 /// 已知可检测的本机 Agent（接入器视图快速接入）。
-pub const KNOWN_AGENTS: &[&str] = &["opencode", "codex", "claude-code"];
+pub const KNOWN_AGENTS: &[&str] = &["opencode", "codex", "hermes", "claude-code"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentStatus {
@@ -181,6 +185,28 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
                 s.note = "已接入但注入块与当前网关不一致（漂移），重新 attach 可修复".into();
             }
         }
+        Adapter::Hermes => {
+            let Some(p) = path else { return s };
+            let mut locs: Vec<String> = Vec::new();
+            if let Some(dir) = p.parent() {
+                if dir.is_dir() {
+                    locs.push(format!("本机：{}", dir.display()));
+                }
+            }
+            for w in hm_windows_homes() {
+                locs.push(format!("Windows 侧：{w}"));
+            }
+            s.installed = !locs.is_empty();
+            if let Ok(text) = std::fs::read_to_string(&p) {
+                s.attached = hm_has_ours(&text);
+                s.drifted = s.attached && hm_drifted(&text, target);
+            }
+            s.note = if s.drifted {
+                "已接入但 base_url 与当前网关不一致（漂移），重新 attach 可修复".into()
+            } else {
+                locs.join("；")
+            };
+        }
     }
     s
 }
@@ -207,6 +233,11 @@ pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
             let parsed = cx_parse(&text, &path)?;
             let (new_text, note) = cx_render(&text, &parsed, target)?;
             Ok(cx_result(target, &path, &text, &new_text, DRY_NOTE, note))
+        }
+        Adapter::Hermes => {
+            let (path, text) = hm_read(home, target)?;
+            let new_text = hm_render(&text, target)?;
+            Ok(hm_result(target, &path, &text, &new_text, DRY_NOTE))
         }
     }
 }
@@ -263,6 +294,23 @@ pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
                 note,
             ))
         }
+        Adapter::Hermes => {
+            let (path, text) = hm_read(home, target)?;
+            let new_text = hm_render(&text, target)?;
+            if new_text == text {
+                return Ok(hm_result(
+                    target,
+                    &path,
+                    &text,
+                    &new_text,
+                    "已接入且配置一致，无需变更",
+                ));
+            }
+            backup(&path)?;
+            std::fs::write(&path, &new_text)
+                .map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+            Ok(hm_result(target, &path, &text, &new_text, APPLIED_NOTE))
+        }
     }
 }
 
@@ -278,6 +326,38 @@ pub fn revert(home: &Path, agent_id: &str) -> Result<ApplyResult, String> {
             note: "通用适配器未写过文件，无需还原".into(),
         }),
         Adapter::ClaudeCode => Err("Claude Code v1 从未被接入，无需还原".into()),
+        Adapter::Hermes => {
+            let path = Adapter::Hermes
+                .config_path(home)
+                .expect("hermes whitelist path");
+            if !path.exists() {
+                return Err(format!("配置文件 {} 不存在", path.display()));
+            }
+            let bp = backup_path(&path);
+            if !bp.exists() {
+                return Err(
+                    "备份文件缺失，无法安全还原 Hermes 配置；请在 Hermes 中手动将 model 块改回原服务商"
+                        .into(),
+                );
+            }
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+            let orig = String::from_utf8_lossy(
+                &std::fs::read(&bp).map_err(|e| format!("读取备份失败: {e}"))?,
+            )
+            .into_owned();
+            std::fs::write(&path, &orig).map_err(|e| format!("写入失败: {e}"))?;
+            Ok(ApplyResult {
+                agent_id: agent_id.into(),
+                adapter: Adapter::Hermes.name(),
+                files: vec![FileChange {
+                    path: path.display().to_string(),
+                    preview: line_preview(&text, &orig),
+                }],
+                env_template: None,
+                note: "已从备份逐字节还原；请重启该 Agent 并新建会话生效".into(),
+            })
+        }
         Adapter::OpenCode | Adapter::Codex => {
             let path = a.config_path(home).expect("adapter whitelist path");
             if !path.exists() {
@@ -780,7 +860,8 @@ mod tests {
         assert_eq!(Adapter::for_agent("opencode"), Adapter::OpenCode);
         assert_eq!(Adapter::for_agent("codex"), Adapter::Codex);
         assert_eq!(Adapter::for_agent("claude-code"), Adapter::ClaudeCode);
-        assert_eq!(Adapter::for_agent("hermes"), Adapter::Generic);
+        assert_eq!(Adapter::for_agent("hermes"), Adapter::Hermes);
+        assert_eq!(Adapter::for_agent("my-ide"), Adapter::Generic);
     }
 
     #[test]
@@ -808,5 +889,138 @@ mod tests {
         let idx_model = out.find("model").unwrap();
         let idx_table = out.find("[t]").unwrap();
         assert!(idx_model < idx_table);
+    }
+}
+
+// ---------------------------------------------------------------- Hermes（YAML）
+
+/// WSL 内探测 Windows 侧 Hermes 主目录（纯文件系统扫描，不起外部进程）。
+fn hm_windows_homes() -> Vec<String> {
+    let mut v = Vec::new();
+    let users = Path::new("/mnt/c/Users");
+    if let Ok(rd) = std::fs::read_dir(users) {
+        for entry in rd.flatten() {
+            let p = entry.path().join(".hermes");
+            if p.is_dir() {
+                v.push(p.display().to_string());
+            }
+        }
+    }
+    v
+}
+
+fn hm_read(home: &Path, _target: &Target) -> Result<(PathBuf, String), String> {
+    let path = Adapter::Hermes
+        .config_path(home)
+        .expect("hermes whitelist path");
+    if !path.exists() {
+        return Err(format!(
+            "未检测到 Hermes 配置文件 {}，请先在本机安装 Hermes",
+            path.display()
+        ));
+    }
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+    Ok((path, text))
+}
+
+/// 顶层 `model:` 块范围 (start, end)，不含 `model:` 行本身。
+fn hm_model_block(lines: &[&str]) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|l| l.trim_end() == "model:")?;
+    let mut end = start + 1;
+    while end < lines.len() {
+        let l = lines[end];
+        if l.trim().is_empty() || l.trim_start().starts_with('#') {
+            end += 1;
+            continue;
+        }
+        if l.starts_with(' ') || l.starts_with('\t') {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    Some((start, end))
+}
+
+fn hm_get(lines: &[&str], key: &str) -> Option<String> {
+    let (s, e) = hm_model_block(lines)?;
+    let prefix = format!("{key}:");
+    lines[s + 1..e].iter().find_map(|l| {
+        l.trim()
+            .strip_prefix(&prefix)
+            .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
+    })
+}
+
+fn hm_has_ours(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    hm_get(&lines, "provider").as_deref() == Some(PROVIDER_NAME)
+}
+
+fn hm_drifted(text: &str, target: &Target) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    hm_get(&lines, "base_url").as_deref() != Some(target.base_url().as_str())
+}
+
+/// 行级手术：只替换/插入 model 块内 provider/base_url/api_key/default 四键，
+/// 其余行逐字节保留（不重排、不丢注释）。
+fn hm_render(text: &str, target: &Target) -> Result<String, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let (s, e) =
+        hm_model_block(&lines).ok_or_else(|| "配置缺少顶层 model: 块，拒绝写入".to_string())?;
+    let want: [(&str, String); 4] = [
+        ("provider", PROVIDER_NAME.to_string()),
+        ("base_url", target.base_url()),
+        ("api_key", KEY_PLACEHOLDER.to_string()),
+        ("default", target.model_pointer()),
+    ];
+    let indent = lines[s + 1..e]
+        .iter()
+        .find(|l| !l.trim().is_empty() && (l.starts_with(' ') || l.starts_with('\t')))
+        .map(|l| l[..l.len() - l.trim_start().len()].to_string())
+        .unwrap_or_else(|| "  ".to_string());
+    let has_key = |k: &str| {
+        lines[s + 1..e]
+            .iter()
+            .any(|l| l.trim().starts_with(&format!("{k}:")))
+    };
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 4);
+    for (i, line) in lines.iter().enumerate() {
+        if i == s {
+            out.push(line.to_string());
+            for (k, v) in want.iter().filter(|(k, _)| !has_key(k)) {
+                out.push(format!("{indent}{k}: {v}"));
+            }
+            continue;
+        }
+        if i > s && i < e {
+            if let Some((k, v)) = want
+                .iter()
+                .find(|(k, _)| line.trim().starts_with(&format!("{k}:")))
+            {
+                out.push(format!("{indent}{k}: {v}"));
+                continue;
+            }
+        }
+        out.push(line.to_string());
+    }
+    let mut res = out.join("\n");
+    if text.ends_with('\n') {
+        res.push('\n');
+    }
+    Ok(res)
+}
+
+fn hm_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> ApplyResult {
+    ApplyResult {
+        agent_id: target.agent_id.clone(),
+        adapter: Adapter::Hermes.name(),
+        files: vec![FileChange {
+            path: path.display().to_string(),
+            preview: line_preview(old, new),
+        }],
+        env_template: None,
+        note: note.into(),
     }
 }

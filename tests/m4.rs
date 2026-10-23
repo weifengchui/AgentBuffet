@@ -231,13 +231,13 @@ fn codex_user_top_model_skips_defaults() {
 #[test]
 fn generic_attach_prints_template_without_files() {
     let home = temp_dir("generic");
-    let r = onboard::apply(&home, &target("hermes", "127.0.0.1:3425")).unwrap();
+    let r = onboard::apply(&home, &target("my-ide", "127.0.0.1:3425")).unwrap();
     let tpl = r.env_template.unwrap();
-    assert!(tpl.contains("export OPENAI_BASE_URL=\"http://127.0.0.1:3425/hermes/v1\""));
+    assert!(tpl.contains("export OPENAI_BASE_URL=\"http://127.0.0.1:3425/my-ide/v1\""));
     assert!(tpl.contains("export OPENAI_API_KEY=\"agentbuffet\""));
     assert!(r.files.is_empty());
     assert_eq!(std::fs::read_dir(&home).unwrap().count(), 0);
-    let r2 = onboard::revert(&home, "hermes").unwrap();
+    let r2 = onboard::revert(&home, "my-ide").unwrap();
     assert!(r2.note.contains("无需还原"), "{}", r2.note);
 }
 
@@ -340,7 +340,7 @@ async fn api_json_shapes() {
     let arr = j.as_array().unwrap();
     assert_eq!(arr.len(), 3);
     let hermes = arr.iter().find(|a| a["agent_id"] == "hermes").unwrap();
-    assert_eq!(hermes["adapter"], "generic");
+    assert_eq!(hermes["adapter"], "hermes");
     assert_eq!(hermes["attached"], false);
 }
 
@@ -567,4 +567,66 @@ fn usage_recent_takes_tail_in_order() {
     assert_eq!(r[19].ts, base + 24);
     assert!(u.recent(100).len() == 25);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hermes_attach_detect_revert() {
+    let home = temp_dir("hm-attach");
+    let p = home.join(".hermes").join("config.yaml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let orig = "model:\n  default: group/cheap-first\n  provider: magpie\n  base_url: https://nowcoding.ai/v1\n  api_key: sk-real-secret\nfallback_providers: []\ntoolsets:\n  - hermes-cli\n";
+    std::fs::write(&p, orig).unwrap();
+
+    let t = target("hermes", "127.0.0.1:3425");
+    let s = onboard::detect(&home, &t);
+    assert!(s.installed, "detect installed");
+    assert!(!s.attached, "detect not attached");
+
+    let r = onboard::apply(&home, &t).unwrap();
+    assert_eq!(r.files.len(), 1);
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.contains("  base_url: http://127.0.0.1:3425/hermes/v1"),
+        "{text}"
+    );
+    assert!(text.contains("  provider: agentbuffet"));
+    assert!(text.contains("  api_key: agentbuffet"));
+    assert!(text.contains("  default: agentbuffet/group/g"));
+    // model 块之外的行逐字节保留
+    assert!(text.contains("fallback_providers: []"));
+    assert!(text.contains("  - hermes-cli"));
+    assert!(!text.contains("sk-real-secret"));
+
+    let s2 = onboard::detect(&home, &t);
+    assert!(s2.attached && !s2.drifted, "attached & no drift");
+
+    // 网关地址变化 → 漂移
+    let s3 = onboard::detect(&home, &target("hermes", "127.0.0.1:9999"));
+    assert!(s3.attached && s3.drifted, "drift detected");
+
+    // 幂等：二次 attach 无变更、备份不被覆盖
+    let bp = format!("{}{}", p.display(), onboard::BACKUP_SUFFIX);
+    let r2 = onboard::apply(&home, &t).unwrap();
+    assert!(r2.note.contains("无需变更"), "{}", r2.note);
+    assert_eq!(std::fs::read(&bp).unwrap(), orig.as_bytes());
+
+    // revert：逐字节还原
+    let r3 = onboard::revert(&home, "hermes").unwrap();
+    assert!(r3.note.contains("逐字节"), "{}", r3.note);
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), orig);
+}
+
+#[test]
+fn hermes_attach_inserts_missing_keys() {
+    let home = temp_dir("hm-insert");
+    let p = home.join(".hermes").join("config.yaml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "model:\n  default: x\nagent:\n  max_turns: 90\n").unwrap();
+    let t = target("hermes", "127.0.0.1:3425");
+    onboard::apply(&home, &t).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("  provider: agentbuffet"), "{text}");
+    assert!(text.contains("  base_url: http://127.0.0.1:3425/hermes/v1"));
+    assert!(text.contains("  api_key: agentbuffet"));
+    assert!(text.contains("agent:\n  max_turns: 90"));
 }

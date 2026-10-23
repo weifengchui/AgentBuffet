@@ -196,12 +196,12 @@ fn codex_injected_toml_defaults_when_user_has_none() {
 #[test]
 fn generic_env_template_shape() {
     let home = temp_dir("gen");
-    let t = target("hermes");
+    let t = target("my-ide");
     let r = onboard::apply(&home, &t).expect("apply ok");
     assert!(r.files.is_empty(), "generic 不写文件");
     let tpl = r.env_template.expect("模板存在");
     assert!(
-        tpl.contains("export OPENAI_BASE_URL=\"http://127.0.0.1:3425/hermes/v1\""),
+        tpl.contains("export OPENAI_BASE_URL=\"http://127.0.0.1:3425/my-ide/v1\""),
         "{tpl}"
     );
     assert!(

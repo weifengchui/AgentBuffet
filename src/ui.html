@@ -835,7 +835,7 @@ async function loadDetect() {
     const fresh = list.filter(d => !d.in_config);
     $("ag-detect").style.display = fresh.length ? "" : "none";
     $("ag-det-list").innerHTML = fresh.map(d => {
-      const canAttach = d.installed && (d.adapter === "opencode" || d.adapter === "codex");
+      const canAttach = d.installed && ["opencode", "codex", "hermes"].includes(d.adapter);
       const stx = d.installed
         ? `<span class="pill on"><i></i>${esc(L("已检测到", "detected"))}</span>`
         : `<span class="pill dim"><i></i>${esc(L("未安装", "not installed"))}</span>`;
