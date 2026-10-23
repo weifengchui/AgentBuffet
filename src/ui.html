@@ -176,6 +176,8 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
 .gcard .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
+.fc { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--dim2); }
+.fc i { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
 .gcard tbody tr { cursor: grab; }
 .gcard tbody tr.dragover td { background: rgba(79,140,255,.14); }
 .gcard.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; }
@@ -376,6 +378,8 @@ const I18N = {
     "ov.map": "链路星图", "ov.mapHint": "在线 Agent → 网关 → 服务商的实时链路；光点代表最近 60 秒内的请求",
     "pv.add": "添加服务商", "pv.hint": "API Key 仅存于本机 env 文件（0600），绝不写入配置",
     "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
+    "rt.quickAdd": "＋ 成员", "rt.disable": "禁用", "rt.enable": "启用", "rt.del": "删除成员",
+    "ag.adapter": "适配器", "ag.adAuto": "自动（按 ID 推断）",
     "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
     "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.models": "使用模型",
     "ag.detect": "本机 Agent 检测", "ag.detectHint": "自动识别本机已安装的编程 Agent，一键接入网关",
@@ -406,6 +410,8 @@ const I18N = {
     "ov.map": "Link star map", "ov.mapHint": "Live agent → gateway → provider links; photons mark requests from the last 60 seconds",
     "pv.add": "Add provider", "pv.hint": "API keys live only in the local env file (0600), never in config",
     "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
+    "rt.quickAdd": "＋ Member", "rt.disable": "Disable", "rt.enable": "Enable", "rt.del": "Remove member",
+    "ag.adapter": "Adapter", "ag.adAuto": "Auto (by ID)",
     "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
     "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.models": "Models",
     "ag.detect": "Detected local agents", "ag.detectHint": "Coding tools found on this machine, attach in one click",
@@ -545,7 +551,9 @@ async function loadOverview() {
       <td class="muted">${fmt(e.prompt_tokens)} / ${fmt(e.completion_tokens)}</td>
       <td>${e.cost_est == null ? "-" : "$" + e.cost_est.toFixed(4)}</td>
       <td class="muted">${e.duration_ms} ms</td>
-      <td class="muted">${esc((e.fail_chain || []).join(" → "))}</td>
+      <td>${(e.fail_chain || []).map(h => { const i = h.lastIndexOf(":"); const p = i > 0 ? h.slice(0, i) : h, st = i > 0 ? h.slice(i + 1) : "";
+        const c = { ok: "#3fb950", degraded: "#f85149", circuit_open: "#d29922", quota_exhausted: "#d29922" }[st] || "#50607a";
+        return `<span class="fc" title="${esc(st || "-")}"><i style="background:${c}"></i>${esc(p)}</span>`; }).join('<span class="muted">→</span>') || `<span class="muted">-</span>`}</td>
     </tr>`).join("")
       || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
     return true;
@@ -878,18 +886,22 @@ async function loadRouting() {
         <div class="g-top"><span class="grip" draggable="true" title="${esc(L("拖动排序", "Drag to reorder"))}">⠿</span><b>${esc(g.name)}</b><span class="chip">#${i + 1}</span>
           <span class="muted">${g.members.length} ${esc(L("个成员", "members"))}</span>
           <div class="g-ops">
+            <button class="btn sm ghost" onclick="quickAddMember('${esc(g.name)}')" title="${esc(L("快捷添加成员", "Quick add member"))}">${esc(t("rt.quickAdd"))}</button>
             <button class="btn sm ghost" onclick="openGroup('${esc(g.name)}')">${esc(L("编辑", "Edit"))}</button>
             <button class="btn sm danger" onclick="delGroup('${esc(g.name)}')">${esc(L("删除", "Delete"))}</button>
           </div></div>
-        <table><thead><tr><th>#</th><th data-i18n="col.provider"></th><th>Model</th><th data-i18n="col.status"></th></tr></thead>
+        <table><thead><tr><th>#</th><th data-i18n="col.provider"></th><th>Model</th><th data-i18n="col.status"></th><th data-i18n="col.ops"></th></tr></thead>
         <tbody>${g.members.map(m => `<tr data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}" title="${esc(L("拖动调整组内优先级", "Drag to reorder priority"))}"><td class="muted">${m.priority}</td><td>${esc(m.provider)}</td>
           <td><code>${esc(m.model)}</code></td>
-          <td>${m.disabled ? `<span class="pill dim"><i></i>${esc(L("已停用", "disabled"))}</span>` : `<span class="pill on"><i></i>${esc(L("可用", "ready"))}</span>`}</td></tr>`).join("")}</tbody></table>
+          <td>${m.disabled ? `<span class="pill dim"><i></i>${esc(L("已停用", "disabled"))}</span>` : `<span class="pill on"><i></i>${esc(L("可用", "ready"))}</span>`}</td>
+          <td style="white-space:nowrap"><button class="btn sm ghost" data-act="tgl" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}">${esc(m.disabled ? L("启用", "Enable") : L("禁用", "Disable"))}</button>
+          <button class="btn sm danger" data-act="del" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}" title="${esc(L("删除成员", "Remove member"))}">✕</button></td></tr>`).join("")}</tbody></table>
       </div>`).join("")
       || `<div class="empty"><div class="big">🧭</div><b>${esc(L("还没有路由组", "No routing groups yet"))}</b>${esc(L("路由组 = 一组「服务商 + 模型」的优先级列表，故障时自动转移", "A group is a prioritized list of provider/model pairs with automatic failover"))}</div>`;
     document.querySelectorAll("#rt-grid [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
     wireGroupDrag();
     wireMemberRows();
+    gridOps();
     return true;
   } catch (err) { toast(err.message, "bad"); return false; }
 }
@@ -923,6 +935,53 @@ function agentRefreshedNote(j) {
   const n = j && j.agents_refreshed ? j.agents_refreshed.length : 0;
   return n ? L(`，已自动刷新 ${n} 个接入器配置`, ` · ${n} agent config(s) refreshed`) : "";
 }
+function gridOps() {
+  document.querySelectorAll("#rt-grid button[data-act]").forEach(b => { b.onclick = () => memberAct(b); });
+}
+async function memberAct(b) {
+  const g = state.groups.find(x => x.name === b.dataset.g); if (!g) return;
+  let ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority, disabled: !!m.disabled }));
+  const hit = (m) => m.provider === b.dataset.p && m.model === b.dataset.m;
+  if (b.dataset.act === "del") ms = ms.filter(m => !hit(m));
+  else ms.forEach(m => { if (hit(m)) m.disabled = !m.disabled; });
+  if (!ms.length) return toast(L("至少保留一个成员", "Keep at least one member"), "warn");
+  try {
+    const j = await post("/_admin/routing", { group: g.name, members: ms });
+    toast(L("已保存并热重载", "Saved & hot-reloaded") + agentRefreshedNote(j), "ok");
+    loadRouting();
+  } catch (err) { toast(err.message, "bad"); }
+}
+function quickAddMember(name) {
+  if (!state.providers.length) { loadRouting(); }
+  const first = state.providers[0];
+  if (!first) return toast(L("请先添加服务商", "Add a provider first"), "warn");
+  openModal(t("rt.quickAdd") + " · " + name, `
+    <label class="f"><span>${esc(t("col.provider"))}</span><select id="qa-p">${providerOpts(first.id)}</select></label>
+    <label class="f"><span>Model</span><span id="qa-mw"></span></label>`,
+    `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
+     <button class="btn primary" id="qa-ok">${esc(L("添加", "Add"))}</button>`);
+  const renderM = () => {
+    const ms = (state.providers.find(x => x.id === $("qa-p").value) || {}).models || [];
+    $("qa-mw").innerHTML = ms.length
+      ? `<select id="qa-m">${ms.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("")}</select>`
+      : `<input id="qa-m" type="text" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
+  };
+  $("qa-p").onchange = renderM; renderM();
+  $("qa-ok").onclick = async () => {
+    const g = state.groups.find(x => x.name === name); if (!g) return;
+    const model = String($("qa-m").value || "").trim();
+    if (!model) return toast(L("模型不能为空", "Model required"), "warn");
+    const ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority, disabled: !!m.disabled }));
+    if (ms.some(m => m.provider === $("qa-p").value && m.model === model)) return toast(L("该成员已存在", "Member already exists"), "warn");
+    ms.push({ provider: $("qa-p").value, model, priority: ms.length + 1 });
+    try {
+      const j = await post("/_admin/routing", { group: name, members: ms });
+      closeModal(); toast(L("成员已添加并热重载", "Member added & hot-reloaded") + agentRefreshedNote(j), "ok");
+      loadRouting();
+    } catch (err) { toast(err.message, "bad"); }
+  };
+}
+
 function wireGroupDrag() {
   const grid = $("rt-grid"); if (!grid) return;
   let dragEl = null;
@@ -970,7 +1029,15 @@ function renderMembers() {
       <button class="btn sm danger" data-act="rm" data-i="${i}">✕</button></div>`;
   }).join("");
   $("gm-list").querySelectorAll("select,input").forEach(el => {
-    el.onchange = () => { gm[+el.dataset.i][el.dataset.f] = el.value; };
+    el.onchange = () => {
+      const row = gm[+el.dataset.i];
+      row[el.dataset.f] = el.value;
+      if (el.dataset.f === "provider") {
+        const ms = (state.providers.find(x => x.id === el.value) || {}).models || [];
+        row.model = ms.includes(row.model) ? row.model : (ms[0] || "");
+        renderMembers();
+      }
+    };
     if (el.tagName === "INPUT") el.oninput = el.onchange;
   });
   let dragI = null;
@@ -1122,11 +1189,14 @@ async function openAgent(id) {
     <label class="f"><span>${esc(L("显示名（可选）", "Display name (optional)"))}</span><input id="ag-dn" type="text" value="${esc((a && a.display_name) || "")}"></label>
     <label class="f"><span>${esc(L("默认路由组", "Default group"))}</span>
       <select id="ag-grp">${state.groups.map(g => `<option value="${esc(g.name)}" ${a && a.default_group === g.name ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
-    <div class="muted">${esc(L("识别方式：请求路径前缀 /<agent-id>/v1/…，或 model 匹配组名", "Match: path prefix /<agent-id>/v1/…, or model equal to a group name"))}</div>`,
+    <label class="f"><span>${esc(t("ag.adapter"))}</span>
+      <select id="ag-ad">${[["", t("ag.adAuto")], ["opencode", "OpenCode"], ["codex", "Codex"], ["hermes", "Hermes"], ["generic", "Generic"], ["claude-code", "Claude Code"]]
+        .map(([v, n]) => `<option value="${esc(v)}" ${((a && a.adapter) || "") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+    <div class="muted">${esc(L("识别方式：请求路径前缀 /<agent-id>/v1/…，或 model 匹配组名。多实例：新建 opencode-work 并选 OpenCode 适配器，接入后用 OPENCODE_CONFIG 指向其独立配置启动", "Match: path prefix /<agent-id>/v1/…, or model equal to a group name. Multi-instance: create opencode-work with the OpenCode adapter, then launch it with OPENCODE_CONFIG pointing at its own config"))}</div>`,
     `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
      <button class="btn primary" id="ag-ok">${esc(L("保存", "Save"))}</button>`);
   $("ag-ok").onclick = async () => {
-    const body = { id: $("ag-id").value.trim() || (id || ""), default_group: $("ag-grp").value, display_name: $("ag-dn").value.trim() };
+    const body = { id: $("ag-id").value.trim() || (id || ""), default_group: $("ag-grp").value, display_name: $("ag-dn").value.trim(), adapter: $("ag-ad").value };
     if (!body.id) return toast(L("Agent ID 不能为空", "Agent ID required"), "warn");
     $("ag-ok").disabled = true;
     try {

@@ -65,6 +65,8 @@ pub struct Member {
     pub provider: String,
     pub model: String,
     pub priority: u32,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,6 +85,9 @@ pub struct Agent {
     #[serde(default)]
     pub display_name: String,
     pub default_group: String,
+    /// 显式适配器（如 opencode），支持同一工具多实例接入；空则按 id 推断。
+    #[serde(default)]
+    pub adapter: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -220,6 +225,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// 组内启用成员按 priority 升序（路由候选）。
+    pub fn active_members(&self, group: &str) -> Vec<&Member> {
+        self.group_members(group)
+            .into_iter()
+            .filter(|m| !m.disabled)
+            .collect()
+    }
+
     /// 组内成员按 priority 升序。
     pub fn group_members(&self, group: &str) -> Vec<&Member> {
         let mut m: Vec<&Member> = match self.groups.get(group) {

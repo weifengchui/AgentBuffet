@@ -40,6 +40,8 @@ pub struct Target {
     pub models: Vec<String>,
     /// 网关监听地址，如 `127.0.0.1:3425`。
     pub gateway_addr: String,
+    /// 显式适配器提示（opencode/codex/hermes/claude-code/generic）；空则按 agent_id 推断。
+    pub adapter: String,
 }
 
 impl Target {
@@ -72,6 +74,18 @@ impl Adapter {
     }
 
     /// agent id → 适配器。已知名字用专属适配器，其余走通用（只打印模板）。
+    /// 优先按显式提示解析适配器，支持多实例（如 opencode-work 复用 OpenCode 适配器）。
+    pub fn resolve(agent_id: &str, hint: &str) -> Adapter {
+        match hint {
+            "opencode" => Adapter::OpenCode,
+            "codex" => Adapter::Codex,
+            "hermes" => Adapter::Hermes,
+            "claude-code" => Adapter::ClaudeCode,
+            "generic" => Adapter::Generic,
+            _ => Adapter::for_agent(agent_id),
+        }
+    }
+
     pub fn for_agent(agent_id: &str) -> Adapter {
         match agent_id {
             "opencode" => Adapter::OpenCode,
@@ -83,9 +97,26 @@ impl Adapter {
     }
 
     /// 适配器白名单文件路径（Generic 无文件）。
-    pub fn config_path(self, home: &Path) -> Option<PathBuf> {
+    pub fn config_path(self, home: &Path, agent_id: &str) -> Option<PathBuf> {
         match self {
-            Adapter::OpenCode => Some(home.join(".config").join("opencode").join("opencode.json")),
+            Adapter::OpenCode => {
+                let fname = if agent_id == "opencode" {
+                    "opencode.json".to_string()
+                } else {
+                    let safe: String = agent_id
+                        .chars()
+                        .map(|c| {
+                            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                                c
+                            } else {
+                                '-'
+                            }
+                        })
+                        .collect();
+                    format!("{safe}.json")
+                };
+                Some(home.join(".config").join("opencode").join(fname))
+            }
             Adapter::Codex => Some(home.join(".codex").join("config.toml")),
             Adapter::Hermes => Some(home.join(".hermes").join("config.yaml")),
             Adapter::ClaudeCode => Some(home.join(".claude.json")),
@@ -133,8 +164,8 @@ const DRY_NOTE: &str = "dry-run：以下为将写入的变更预览，未落盘"
 
 /// 检测单个 agent 的适配器状态（只读）。
 pub fn detect(home: &Path, target: &Target) -> AgentStatus {
-    let a = Adapter::for_agent(&target.agent_id);
-    let path = a.config_path(home);
+    let a = Adapter::resolve(&target.agent_id, &target.adapter);
+    let path = a.config_path(home, &target.agent_id);
     let cp = path.as_ref().map(|p| p.display().to_string());
     let mut s = AgentStatus {
         agent_id: target.agent_id.clone(),
@@ -215,7 +246,7 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
 
 /// dry-run：输出将修改的文件与 diff 预览，不落盘（§7 plan）。
 pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
-    let a = Adapter::for_agent(&target.agent_id);
+    let a = Adapter::resolve(&target.agent_id, &target.adapter);
     match a {
         Adapter::Generic => Ok(generic_result(
             target,
@@ -246,7 +277,7 @@ pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
 
 /// 实际写入：备份 → 注入（幂等）。
 pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
-    let a = Adapter::for_agent(&target.agent_id);
+    let a = Adapter::resolve(&target.agent_id, &target.adapter);
     match a {
         Adapter::Generic => Ok(generic_result(target, APPLIED_NOTE)),
         Adapter::ClaudeCode => {
@@ -317,8 +348,8 @@ pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
 }
 
 /// 还原：优先从备份恢复（逐字节），备份丢失时精确删除注入块。
-pub fn revert(home: &Path, agent_id: &str) -> Result<ApplyResult, String> {
-    let a = Adapter::for_agent(agent_id);
+pub fn revert(home: &Path, agent_id: &str, hint: &str) -> Result<ApplyResult, String> {
+    let a = Adapter::resolve(agent_id, hint);
     match a {
         Adapter::Generic => Ok(ApplyResult {
             agent_id: agent_id.into(),
@@ -330,7 +361,7 @@ pub fn revert(home: &Path, agent_id: &str) -> Result<ApplyResult, String> {
         Adapter::ClaudeCode => Err("Claude Code v1 从未被接入，无需还原".into()),
         Adapter::Hermes => {
             let path = Adapter::Hermes
-                .config_path(home)
+                .config_path(home, agent_id)
                 .expect("hermes whitelist path");
             if !path.exists() {
                 return Err(format!("配置文件 {} 不存在", path.display()));
@@ -361,7 +392,9 @@ pub fn revert(home: &Path, agent_id: &str) -> Result<ApplyResult, String> {
             })
         }
         Adapter::OpenCode | Adapter::Codex => {
-            let path = a.config_path(home).expect("adapter whitelist path");
+            let path = a
+                .config_path(home, agent_id)
+                .expect("adapter whitelist path");
             if !path.exists() {
                 return Err(format!("配置文件 {} 不存在", path.display()));
             }
@@ -469,10 +502,19 @@ fn generic_result(target: &Target, note: &str) -> ApplyResult {
 
 // ---------------------------------------------------------------- OpenCode（JSON）
 
-fn oc_read(home: &Path, _target: &Target) -> Result<(PathBuf, String), String> {
+fn oc_read(home: &Path, target: &Target) -> Result<(PathBuf, String), String> {
     let path = Adapter::OpenCode
-        .config_path(home)
+        .config_path(home, &target.agent_id)
         .expect("opencode whitelist path");
+    // 多实例：独立文件缺失时，从主配置（或空 JSON）播种，避免要求用户手建文件
+    if !path.exists() && target.agent_id != "opencode" {
+        let main = home.join(".config").join("opencode").join("opencode.json");
+        let seed = std::fs::read_to_string(&main).unwrap_or_else(|_| "{}".into());
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&path, seed).map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
+    }
     if !path.exists() {
         return Err(format!(
             "未检测到 OpenCode 配置文件 {}，请先安装 OpenCode",
@@ -587,15 +629,22 @@ fn oc_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> 
             preview: line_preview(old, new),
         }],
         env_template: None,
-        note: note.into(),
+        note: if target.agent_id == "opencode" {
+            note.into()
+        } else {
+            format!(
+                "{note}；多实例启动：OPENCODE_CONFIG={} opencode",
+                path.display()
+            )
+        },
     }
 }
 
 // ---------------------------------------------------------------- Codex（TOML）
 
-fn cx_read(home: &Path, _target: &Target) -> Result<(PathBuf, String), String> {
+fn cx_read(home: &Path, target: &Target) -> Result<(PathBuf, String), String> {
     let path = Adapter::Codex
-        .config_path(home)
+        .config_path(home, &target.agent_id)
         .expect("codex whitelist path");
     if !path.exists() {
         return Err(format!(
@@ -866,9 +915,9 @@ fn hm_windows_homes() -> Vec<String> {
     v
 }
 
-fn hm_read(home: &Path, _target: &Target) -> Result<(PathBuf, String), String> {
+fn hm_read(home: &Path, target: &Target) -> Result<(PathBuf, String), String> {
     let path = Adapter::Hermes
-        .config_path(home)
+        .config_path(home, &target.agent_id)
         .expect("hermes whitelist path");
     if !path.exists() {
         return Err(format!(

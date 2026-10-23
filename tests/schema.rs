@@ -27,6 +27,7 @@ fn target(agent: &str) -> onboard::Target {
         groups: vec!["cheap".into(), "coding-flash".into()],
         models: vec!["deepseek-chat".into(), "gpt-4o-mini".into()],
         gateway_addr: "127.0.0.1:3425".into(),
+        adapter: String::new(),
     }
 }
 

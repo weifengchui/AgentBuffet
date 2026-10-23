@@ -83,6 +83,7 @@ pub fn agent_targets(snap: &config::Snapshot) -> Vec<onboard::Target> {
             groups: groups.clone(),
             models: routable_models(snap, &snap.agents[id].default_group),
             gateway_addr: snap.gateway_addr.to_string(),
+            adapter: snap.agents[id].adapter.clone(),
         })
         .collect()
 }
@@ -90,7 +91,7 @@ pub fn agent_targets(snap: &config::Snapshot) -> Vec<onboard::Target> {
 /// 组内可路由的真实模型（已排序去重），供注入器枚举可直接选择的模型。
 pub fn routable_models(snap: &config::Snapshot, group: &str) -> Vec<String> {
     let mut v: Vec<String> = snap
-        .group_members(group)
+        .active_members(group)
         .into_iter()
         .map(|m| m.model.clone())
         .collect();
@@ -251,11 +252,12 @@ async fn routing_view(
                 .group_members(name)
                 .into_iter()
                 .map(|m| {
-                    let disabled = snap
-                        .providers
-                        .get(&m.provider)
-                        .map(|p| p.disabled)
-                        .unwrap_or(false);
+                    let disabled = m.disabled
+                        || snap
+                            .providers
+                            .get(&m.provider)
+                            .map(|p| p.disabled)
+                            .unwrap_or(false);
                     serde_json::json!({
                         "provider": m.provider,
                         "model": m.model,
@@ -344,6 +346,7 @@ async fn agent_attach(
         groups: gnames.into_iter().cloned().collect(),
         models: routable_models(&snap, &group),
         gateway_addr: snap.gateway_addr.to_string(),
+        adapter: a.adapter.clone(),
     };
     let res = if req.dry_run {
         onboard::plan(&st.home, &target)
@@ -370,7 +373,14 @@ async fn agent_detach(
     if let Some(r) = guard(peer) {
         return r;
     }
-    match onboard::revert(&st.home, &req.agent_id) {
+    let hint = {
+        let snap = st.snap.read().await;
+        snap.agents
+            .get(&req.agent_id)
+            .map(|a| a.adapter.clone())
+            .unwrap_or_default()
+    };
+    match onboard::revert(&st.home, &req.agent_id, &hint) {
         Ok(r) => json_response(
             StatusCode::OK,
             serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({})),
@@ -517,6 +527,8 @@ struct MemberReq {
     provider: String,
     model: String,
     priority: u32,
+    #[serde(default)]
+    disabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -608,6 +620,12 @@ async fn routing_edit(
                     serde_yaml::Value::String("priority".into()),
                     serde_yaml::Value::Number(m.priority.into()),
                 );
+                if m.disabled {
+                    map.insert(
+                        serde_yaml::Value::String("disabled".into()),
+                        serde_yaml::Value::Bool(true),
+                    );
+                }
                 serde_yaml::Value::Mapping(map)
             })
             .collect();
@@ -1308,6 +1326,8 @@ struct GroupMemberIn {
     model: String,
     #[serde(default)]
     priority: u32,
+    #[serde(default)]
+    disabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1366,6 +1386,9 @@ async fn group_upsert(
                     ystr("priority"),
                     serde_yaml::Value::Number((m.priority.max(1) + i as u32).into()),
                 );
+                if m.disabled {
+                    e.insert(ystr("disabled"), serde_yaml::Value::Bool(true));
+                }
                 serde_yaml::Value::Mapping(e)
             })
             .collect();
@@ -1419,6 +1442,8 @@ struct AgentUpsert {
     #[serde(default)]
     display_name: Option<String>,
     default_group: String,
+    #[serde(default)]
+    adapter: Option<String>,
 }
 
 async fn agent_upsert(
@@ -1451,6 +1476,14 @@ async fn agent_upsert(
         map.insert(ystr("id"), ystr(&id));
         if !dn.trim().is_empty() {
             map.insert(ystr("display_name"), ystr(dn.trim()));
+        }
+        if let Some(ad) = body
+            .adapter
+            .as_deref()
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+        {
+            map.insert(ystr("adapter"), ystr(ad));
         }
         map.insert(ystr("default_group"), ystr(&dg));
         match as_
@@ -1647,6 +1680,7 @@ async fn agents_detect(
             default_group: String::new(),
             groups: Vec::new(),
             models: Vec::new(),
+            adapter: String::new(),
             gateway_addr: snap.gateway_addr.to_string(),
         };
         let mut v = serde_json::to_value(onboard::detect(&st.home, &target))
@@ -1930,7 +1964,7 @@ async fn models_agent(
     let mut seen: HashSet<String> = HashSet::new();
 
     if let Some(a) = snap.agents.get(&agent) {
-        for m in snap.group_members(&a.default_group) {
+        for m in snap.active_members(&a.default_group) {
             if let Some(p) = snap.providers.get(&m.provider) {
                 if seen.insert(m.model.clone()) {
                     data.push(serde_json::json!({

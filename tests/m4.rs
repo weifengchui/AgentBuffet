@@ -32,6 +32,7 @@ fn target(agent: &str, addr: &str) -> onboard::Target {
         groups: vec!["g".into()],
         models: vec!["m1".into(), "m2".into()],
         gateway_addr: addr.into(),
+        adapter: String::new(),
     }
 }
 
@@ -134,7 +135,7 @@ fn opencode_attach_idempotent_and_detach_byte_identical() {
     assert_eq!(std::fs::read(&bp).unwrap(), orig.as_bytes());
 
     // detach：逐字节还原
-    let r3 = onboard::revert(&home, "opencode").unwrap();
+    let r3 = onboard::revert(&home, "opencode", "").unwrap();
     assert!(r3.note.contains("逐字节"), "{}", r3.note);
     assert_eq!(std::fs::read(&p).unwrap(), orig.as_bytes());
 }
@@ -168,7 +169,7 @@ fn opencode_detach_without_backup_removes_only_provider() {
     onboard::apply(&home, &target("opencode", "127.0.0.1:3425")).unwrap();
     std::fs::remove_file(format!("{}{}", p.display(), onboard::BACKUP_SUFFIX)).unwrap();
 
-    let r = onboard::revert(&home, "opencode").unwrap();
+    let r = onboard::revert(&home, "opencode", "").unwrap();
     assert!(r.note.contains("仅删除注入的 provider"), "{}", r.note);
     let text = std::fs::read_to_string(&p).unwrap();
     let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -204,7 +205,7 @@ fn codex_attach_layout_and_detach_byte_identical() {
     let i_tbl = text.find("# >>> agentbuffet:begin").unwrap();
     assert!(i_def < i_feat && i_feat < i_tbl);
 
-    let r2 = onboard::revert(&home, "codex").unwrap();
+    let r2 = onboard::revert(&home, "codex", "").unwrap();
     assert!(r2.note.contains("逐字节"), "{}", r2.note);
     assert_eq!(std::fs::read(&p).unwrap(), orig.as_bytes());
 }
@@ -225,7 +226,7 @@ fn codex_user_top_model_skips_defaults() {
     let parsed: toml::Value = text.parse().unwrap();
     assert_eq!(parsed["model_provider"].as_str(), Some("openai"));
 
-    let r2 = onboard::revert(&home, "codex").unwrap();
+    let r2 = onboard::revert(&home, "codex", "").unwrap();
     assert!(r2.note.contains("逐字节"), "{}", r2.note);
     assert_eq!(std::fs::read(&p).unwrap(), orig.as_bytes());
 }
@@ -239,7 +240,7 @@ fn generic_attach_prints_template_without_files() {
     assert!(tpl.contains("export OPENAI_API_KEY=\"agentbuffet\""));
     assert!(r.files.is_empty());
     assert_eq!(std::fs::read_dir(&home).unwrap().count(), 0);
-    let r2 = onboard::revert(&home, "my-ide").unwrap();
+    let r2 = onboard::revert(&home, "my-ide", "").unwrap();
     assert!(r2.note.contains("无需还原"), "{}", r2.note);
 }
 
@@ -564,6 +565,7 @@ async fn routing_edit_refreshes_drifted_agent_config() {
         groups: vec!["g".into()],
         models: vec!["m1".into()],
         gateway_addr: "127.0.0.1:9".into(),
+        adapter: String::new(),
     };
     onboard::apply(&st.home, &old).expect("attach ok");
 
@@ -608,6 +610,70 @@ async fn routing_edit_refreshes_drifted_agent_config() {
     .await;
     assert_eq!(code, StatusCode::OK, "{j}");
     assert!(j["agents_refreshed"].as_array().unwrap().is_empty(), "{j}");
+}
+
+#[tokio::test]
+async fn member_disable_persists_and_shows_in_view() {
+    let (st, dir) = state_for("mdis", temp_dir("mdis-home"));
+    let cfg = dir.join("config.yaml");
+    let (code, _) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/routing",
+        Some(serde_json::json!({
+            "group": "g",
+            "members": [
+                {"provider": "p1", "model": "m1", "priority": 1, "disabled": true},
+                {"provider": "p2", "model": "m2", "priority": 2}
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    assert!(text.contains("disabled: true"), "{text}");
+    let (_, j) = call(st.clone(), LB, "GET", "/api/routing", None).await;
+    assert_eq!(j["groups"][0]["members"][0]["disabled"], true);
+    assert_eq!(j["groups"][0]["members"][1]["disabled"], false);
+}
+
+#[tokio::test]
+async fn multi_instance_opencode_uses_own_config_file() {
+    let (st, dir) = state_for("mins", temp_dir("mins-home"));
+    let oc = st.home.join(".config/opencode");
+    std::fs::create_dir_all(&oc).unwrap();
+    std::fs::write(oc.join("opencode.json"), "{}").unwrap();
+    // 新建第二个实例 agent：opencode-work，显式复用 OpenCode 适配器
+    let (code, _) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/agent",
+        Some(
+            serde_json::json!({"id": "opencode-work", "default_group": "g", "adapter": "opencode"}),
+        ),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    let (code, _) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/api/agents/attach",
+        Some(serde_json::json!({"agent_id": "opencode-work"})),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    // 独立文件生成，且 base_url 带自身 agent 路径段
+    let own = oc.join("opencode-work.json");
+    let text = std::fs::read_to_string(&own).unwrap();
+    assert!(text.contains("/opencode-work/v1"), "{text}");
+    // 主实例文件未被覆盖
+    assert!(!std::fs::read_to_string(oc.join("opencode.json"))
+        .unwrap()
+        .contains("buffet"));
+    let _ = dir;
 }
 
 #[tokio::test]
@@ -740,7 +806,7 @@ fn hermes_attach_detect_revert() {
     assert_eq!(std::fs::read(&bp).unwrap(), orig.as_bytes());
 
     // revert：逐字节还原
-    let r3 = onboard::revert(&home, "hermes").unwrap();
+    let r3 = onboard::revert(&home, "hermes", "").unwrap();
     assert!(r3.note.contains("逐字节"), "{}", r3.note);
     assert_eq!(std::fs::read_to_string(&p).unwrap(), orig);
 }

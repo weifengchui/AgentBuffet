@@ -131,6 +131,9 @@ pub fn resolve(
 
     let mut candidates = Vec::new();
     for m in matched {
+        if m.disabled {
+            continue;
+        }
         let p = match snap.providers.get(&m.provider) {
             Some(p) => p,
             None => continue,

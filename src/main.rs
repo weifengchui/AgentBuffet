@@ -249,6 +249,7 @@ fn agents_cmd(args: &[String]) {
                 groups: names.into_iter().cloned().collect(),
                 models: agentbuffet::routable_models(&snap, &g),
                 gateway_addr: snap.gateway_addr.to_string(),
+                adapter: a.adapter.clone(),
             };
             let res = if dry {
                 onboard::plan(&home, &target)
@@ -268,7 +269,12 @@ fn agents_cmd(args: &[String]) {
                 eprintln!("agents detach 需要 <agent_id>");
                 usage(2);
             };
-            match onboard::revert(&home, id) {
+            let hint = snap
+                .agents
+                .get(id)
+                .map(|x| x.adapter.clone())
+                .unwrap_or_default();
+            match onboard::revert(&home, id, &hint) {
                 Ok(r) => print_apply_result(&r),
                 Err(e) => {
                     eprintln!("还原失败: {e}");
