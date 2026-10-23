@@ -55,7 +55,7 @@ fn usage(code: i32) -> ! {
         \x20     buffetd agents detect|status       列出全部 agent 接入状态\n\
         \x20     buffetd agents attach <id> [--group g] [--dry-run]\n\
         \x20     buffetd agents detach <id>         还原（备份优先，逐字节）\n\
-        \x20     buffetd service install|uninstall  写/删 systemd 用户级自启单元\n\
+        \x20     buffetd service install|uninstall|status  开机自启（systemd 用户单元 / Windows 启动目录）\n\
         \x20     buffetd config export [--out PATH]   导出当前配置（默认 stdout）\n\
         \x20     buffetd config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）"
     );
@@ -237,8 +237,9 @@ fn agents_cmd(args: &[String]) {
             names.sort();
             let target = onboard::Target {
                 agent_id: id.clone(),
-                default_group: g,
+                default_group: g.clone(),
                 groups: names.into_iter().cloned().collect(),
+                models: agentbuffet::routable_models(&snap, &g),
                 gateway_addr: snap.gateway_addr.to_string(),
             };
             let res = if dry {
@@ -272,14 +273,6 @@ fn agents_cmd(args: &[String]) {
             usage(2);
         }
     }
-}
-
-fn unit_path() -> PathBuf {
-    onboard::home_dir()
-        .join(".config")
-        .join("systemd")
-        .join("user")
-        .join("agentbuffet.service")
 }
 
 fn config_cmd(args: &[String]) {
@@ -364,50 +357,37 @@ fn config_cmd(args: &[String]) {
 }
 
 fn service_cmd(args: &[String]) {
+    let home = onboard::home_dir();
     match args.first().map(|s| s.as_str()).unwrap_or("") {
-        "install" => {
-            let p = unit_path();
-            if let Some(dir) = p.parent() {
-                if let Err(e) = std::fs::create_dir_all(dir) {
-                    eprintln!("创建 {} 失败: {e}", dir.display());
-                    std::process::exit(1);
+        "install" => match agentbuffet::autostart::enable(&home) {
+            Ok(s) => {
+                println!("已启用开机自启（{}）", s.method);
+                println!("  单元/脚本: {}", s.unit_path);
+                if !s.link_path.is_empty() {
+                    println!("  启用链接: {}", s.link_path);
                 }
+                println!("下次登录（开机）自动启动网关；真实 Key 请确保在 ~/.agentbuffet/env。");
             }
-            let exe = std::env::current_exe()
-                .map(|x| x.display().to_string())
-                .unwrap_or_else(|_| "buffetd".into());
-            let env_file = agentbuffet_home().join("env");
-            let unit = format!(
-                "[Unit]\nDescription=AgentBuffet AI gateway\n\
-                 [Service]\nExecStart={exe} serve\nRestart=on-failure\n\
-                 EnvironmentFile=-{env}\n\
-                 [Install]\nWantedBy=default.target\n",
-                env = env_file.display()
-            );
-            if let Err(e) = std::fs::write(&p, unit) {
-                eprintln!("写入 {} 失败: {e}", p.display());
+            Err(e) => {
+                eprintln!("启用失败: {e}");
                 std::process::exit(1);
             }
-            println!("已写入自启单元: {}", p.display());
-            println!(
-                "真实 Key 请放入 {}（600 权限），然后手动执行：",
-                env_file.display()
-            );
-            println!("  systemctl --user daemon-reload && systemctl --user enable --now agentbuffet.service");
-        }
-        "uninstall" => {
-            let p = unit_path();
-            match std::fs::remove_file(&p) {
-                Ok(_) => println!("已删除 {}", p.display()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    println!("{} 不存在，无需删除", p.display())
-                }
-                Err(e) => {
-                    eprintln!("删除 {} 失败: {e}", p.display());
-                    std::process::exit(1);
-                }
+        },
+        "uninstall" => match agentbuffet::autostart::disable(&home) {
+            Ok(_) => println!("已关闭开机自启（单元/脚本与启用链接已删除）"),
+            Err(e) => {
+                eprintln!("关闭失败: {e}");
+                std::process::exit(1);
             }
-            println!("如已启用，请手动执行：systemctl --user disable --now agentbuffet.service");
+        },
+        "status" => {
+            let s = agentbuffet::autostart::status(&home);
+            println!("方式: {}", s.method);
+            println!("已启用: {}", if s.enabled { "是" } else { "否" });
+            println!("单元/脚本: {}", s.unit_path);
+            if !s.link_path.is_empty() {
+                println!("启用链接: {}", s.link_path);
+            }
         }
         other => {
             eprintln!("buffetd: 未知 service 子命令: {other}");

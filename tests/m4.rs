@@ -30,6 +30,7 @@ fn target(agent: &str, addr: &str) -> onboard::Target {
         agent_id: agent.into(),
         default_group: "g".into(),
         groups: vec!["g".into()],
+        models: vec!["m1".into(), "m2".into()],
         gateway_addr: addr.into(),
     }
 }
@@ -118,6 +119,7 @@ fn opencode_attach_idempotent_and_detach_byte_identical() {
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(text.contains("http://127.0.0.1:3425/opencode/v1"));
     assert!(text.contains("\"apiKey\": \"agentbuffet\""));
+    assert!(text.contains("\"m1\""), "真实模型必须注入");
     assert!(text.contains("\"theme\""));
     // 备份 = 原始逐字节
     let bp = format!("{}{}", p.display(), onboard::BACKUP_SUFFIX);

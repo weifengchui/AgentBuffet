@@ -262,6 +262,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
           <button class="btn primary" onclick="saveGateway()" data-i18n="st.saveGw"></button>
         </div>
         <div class="panel">
+          <h3 data-i18n="st.autostart"></h3>
+          <div class="muted" data-i18n="st.autostartHint"></div>
+          <div class="mrow" style="margin-top:12px;align-items:center">
+            <label class="ck"><input id="as-enable" type="checkbox" onchange="toggleAutostart(this.checked)"><span data-i18n="st.asOn"></span></label>
+          </div>
+          <div class="muted" id="as-path" style="font-size:12px;margin-top:6px;word-break:break-all"></div>
+        </div>
+        <div class="panel">
           <h3 data-i18n="st.backup"></h3>
           <div class="muted" data-i18n="st.backupHint"></div>
           <hr class="sep">
@@ -334,6 +342,8 @@ const I18N = {
     "st.addr": "网关监听地址（API）", "st.uiAddr": "控制台监听地址（UI）",
     "st.retain": "日志保留天数", "st.expose": "将路由组暴露为 group/ 虚拟模型",
     "st.saveGw": "保存网关设置",
+    "st.autostart": "开机自启", "st.autostartHint": "登录（开机）后自动启动网关进程；Linux/WSL 使用 systemd 用户单元，Windows 使用启动目录脚本",
+    "st.asOn": "开机自动启动 AgentBuffet",
     "st.backup": "加密备份", "st.backupHint": "备份包含完整配置与全部 API Key，经 Argon2id + AES-256-GCM 加密",
     "st.exportB": "导出备份", "st.exportPw": "设置备份密码", "st.doExport": "导出 .aback",
     "st.importB": "导入备份", "st.importPw": "输入备份密码", "st.doImport": "选择文件并导入",
@@ -360,6 +370,8 @@ const I18N = {
     "st.addr": "Gateway listen address (API)", "st.uiAddr": "Console listen address (UI)",
     "st.retain": "Log retention days", "st.expose": "Expose routing groups as group/ virtual models",
     "st.saveGw": "Save gateway settings",
+    "st.autostart": "Autostart", "st.autostartHint": "Start the gateway automatically at login/boot (systemd user unit on Linux/WSL, Startup folder script on Windows)",
+    "st.asOn": "Start AgentBuffet at boot",
     "st.backup": "Encrypted backup", "st.backupHint": "Backup contains the full config and all API keys, sealed with Argon2id + AES-256-GCM",
     "st.exportB": "Export backup", "st.exportPw": "Choose a backup password", "st.doExport": "Export .aback",
     "st.importB": "Import backup", "st.importPw": "Backup password", "st.doImport": "Pick file & import",
@@ -947,6 +959,7 @@ async function doDetach(id) {
 "use strict";
 // ---------------- settings ----------------
 async function loadSettings() {
+  loadAutostart();
   try {
     const j = await api("/api/config");
     state.gw = j.gateway; renderPills();
@@ -972,6 +985,28 @@ async function saveGateway() {
     else toast(L("已保存并热重载", "Saved & hot-reloaded"), "ok");
     loadSettings();
   } catch (err) { toast(err.message, "bad"); }
+}
+async function loadAutostart() {
+  try {
+    const a = await api("/api/autostart");
+    $("as-enable").checked = !!a.enabled;
+    $("as-path").textContent = a.enabled ? (a.unit_path + (a.link_path ? " · " + a.link_path : "")) : "";
+  } catch (err) { /* 端点不可用时静默 */ }
+}
+async function toggleAutostart(on) {
+  const box = $("as-enable");
+  box.disabled = true;
+  try {
+    const r = await post("/_admin/autostart", { enable: on });
+    box.checked = !!r.enabled;
+    $("as-path").textContent = r.enabled ? (r.unit_path + (r.link_path ? " · " + r.link_path : "")) : "";
+    toast(on ? L("已开启开机自启，下次登录生效", "Autostart enabled — effective at next login") : L("已关闭开机自启", "Autostart disabled"), "ok");
+  } catch (err) {
+    box.checked = !on;
+    toast(err.message, "bad");
+  } finally {
+    box.disabled = false;
+  }
 }
 function download(name, data, isText) {
   let blob;

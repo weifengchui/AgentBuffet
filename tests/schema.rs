@@ -25,6 +25,7 @@ fn target(agent: &str) -> onboard::Target {
         agent_id: agent.into(),
         default_group: "coding-flash".into(),
         groups: vec!["cheap".into(), "coding-flash".into()],
+        models: vec!["deepseek-chat".into(), "gpt-4o-mini".into()],
         gateway_addr: "127.0.0.1:3425".into(),
     }
 }
@@ -73,6 +74,9 @@ fn opencode_injected_json_schema() {
         "models: {models:?}"
     );
     assert!(models.contains_key("group/cheap"), "models: {models:?}");
+    // 真实模型必须枚举：OpenCode 本地校验会拒绝未声明的 model ID
+    assert!(models.contains_key("deepseek-chat"), "models: {models:?}");
+    assert!(models.contains_key("gpt-4o-mini"), "models: {models:?}");
 
     // model 指针格式：provider/group/<组名>
     assert_eq!(doc["model"], "agentbuffet/group/coding-flash");
@@ -82,6 +86,35 @@ fn opencode_injected_json_schema() {
     assert!(r2.note.contains("无需变更"), "note: {}", r2.note);
     let text2 = std::fs::read_to_string(home.join(".config/opencode/opencode.json")).unwrap();
     assert_eq!(text, text2);
+}
+
+#[test]
+fn opencode_drifted_when_models_added() {
+    // 组内新增真实模型后，旧注入文件应检出漂移，重新 attach 后新模型可选。
+    let home = temp_dir("oc-drift");
+    write_file(
+        &home.join(".config/opencode/opencode.json"),
+        "{\n  \"theme\": \"catppuccin\"\n}\n",
+    );
+    let t = target("opencode");
+    onboard::apply(&home, &t).expect("apply ok");
+    let mut models = t.models.clone();
+    models.push("new-model".into());
+    models.sort();
+    let t2 = onboard::Target {
+        models,
+        ..t.clone()
+    };
+    let st = onboard::detect(&home, &t2);
+    assert!(st.attached && st.drifted, "status: {st:?}");
+    onboard::apply(&home, &t2).expect("re-apply ok");
+    let text = std::fs::read_to_string(home.join(".config/opencode/opencode.json")).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let models = doc["provider"]["agentbuffet"]["models"]
+        .as_object()
+        .unwrap();
+    assert!(models.contains_key("new-model"), "models: {models:?}");
+    assert!(models.contains_key("deepseek-chat"), "models: {models:?}");
 }
 
 #[test]

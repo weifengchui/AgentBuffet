@@ -36,6 +36,8 @@ pub struct Target {
     pub default_group: String,
     /// 全部路由组名（已排序），注册为 `group/<name>` 虚拟模型。
     pub groups: Vec<String>,
+    /// 所接入组内可路由的真实模型 ID（已排序去重），注入为可直接选择的模型。
+    pub models: Vec<String>,
     /// 网关监听地址，如 `127.0.0.1:3425`。
     pub gateway_addr: String,
 }
@@ -491,6 +493,12 @@ fn oc_expected_provider(target: &Target) -> serde_json::Value {
     for g in &target.groups {
         models.insert(format!("group/{g}"), serde_json::json!({ "name": g }));
     }
+    // OpenCode 本地会拒绝未声明的 model ID，必须把组内真实可路由模型一并枚举。
+    for m in &target.models {
+        models
+            .entry(m.clone())
+            .or_insert_with(|| serde_json::json!({ "name": m }));
+    }
     serde_json::json!({
         "npm": "@ai-sdk/openai-compatible",
         "name": "AgentBuffet",
@@ -841,57 +849,6 @@ fn line_preview(old: &str, new: &str) -> String {
     out
 }
 
-// ---------------------------------------------------------------- 测试
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn line_preview_basic() {
-        let d = line_preview("a\nb\nc\n", "a\nX\nc\n");
-        assert!(d.contains("- b"));
-        assert!(d.contains("+ X"));
-        assert_eq!(line_preview("same\n", "same\n"), "(无变更)");
-    }
-
-    #[test]
-    fn adapter_routing() {
-        assert_eq!(Adapter::for_agent("opencode"), Adapter::OpenCode);
-        assert_eq!(Adapter::for_agent("codex"), Adapter::Codex);
-        assert_eq!(Adapter::for_agent("claude-code"), Adapter::ClaudeCode);
-        assert_eq!(Adapter::for_agent("hermes"), Adapter::Hermes);
-        assert_eq!(Adapter::for_agent("my-ide"), Adapter::Generic);
-    }
-
-    #[test]
-    fn cx_replace_and_remove_region_roundtrip() {
-        let text = "top = 1\n\n[foo]\nx = 2\n";
-        let block = format!(
-            "{CX_TABLE_BEGIN}\n[model_providers.agentbuffet]\nbase_url = \"u\"\n{CX_TABLE_END}\n"
-        );
-        let (t2, applied) = replace_region(text, CX_TABLE_BEGIN, CX_TABLE_END, &block);
-        assert!(!applied);
-        assert_eq!(t2, text);
-        let with = text.to_string() + "\n" + &block;
-        let (t3, applied) = replace_region(&with, CX_TABLE_BEGIN, CX_TABLE_END, &block);
-        assert!(applied);
-        assert!(t3.contains("[model_providers.agentbuffet]"));
-        let removed = remove_region(&t3, CX_TABLE_BEGIN, CX_TABLE_END);
-        assert!(!removed.contains("agentbuffet"));
-        assert!(removed.contains("[foo]"));
-    }
-
-    #[test]
-    fn insert_defaults_before_first_table() {
-        let text = "a = 1\n\n[t]\nb = 2\n";
-        let out = insert_before_first_table(text, "model = \"x\"\n");
-        let idx_model = out.find("model").unwrap();
-        let idx_table = out.find("[t]").unwrap();
-        assert!(idx_model < idx_table);
-    }
-}
-
 // ---------------------------------------------------------------- Hermes（YAML）
 
 /// WSL 内探测 Windows 侧 Hermes 主目录（纯文件系统扫描，不起外部进程）。
@@ -1022,5 +979,56 @@ fn hm_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> 
         }],
         env_template: None,
         note: note.into(),
+    }
+}
+
+// ---------------------------------------------------------------- 测试
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_preview_basic() {
+        let d = line_preview("a\nb\nc\n", "a\nX\nc\n");
+        assert!(d.contains("- b"));
+        assert!(d.contains("+ X"));
+        assert_eq!(line_preview("same\n", "same\n"), "(无变更)");
+    }
+
+    #[test]
+    fn adapter_routing() {
+        assert_eq!(Adapter::for_agent("opencode"), Adapter::OpenCode);
+        assert_eq!(Adapter::for_agent("codex"), Adapter::Codex);
+        assert_eq!(Adapter::for_agent("claude-code"), Adapter::ClaudeCode);
+        assert_eq!(Adapter::for_agent("hermes"), Adapter::Hermes);
+        assert_eq!(Adapter::for_agent("my-ide"), Adapter::Generic);
+    }
+
+    #[test]
+    fn cx_replace_and_remove_region_roundtrip() {
+        let text = "top = 1\n\n[foo]\nx = 2\n";
+        let block = format!(
+            "{CX_TABLE_BEGIN}\n[model_providers.agentbuffet]\nbase_url = \"u\"\n{CX_TABLE_END}\n"
+        );
+        let (t2, applied) = replace_region(text, CX_TABLE_BEGIN, CX_TABLE_END, &block);
+        assert!(!applied);
+        assert_eq!(t2, text);
+        let with = text.to_string() + "\n" + &block;
+        let (t3, applied) = replace_region(&with, CX_TABLE_BEGIN, CX_TABLE_END, &block);
+        assert!(applied);
+        assert!(t3.contains("[model_providers.agentbuffet]"));
+        let removed = remove_region(&t3, CX_TABLE_BEGIN, CX_TABLE_END);
+        assert!(!removed.contains("agentbuffet"));
+        assert!(removed.contains("[foo]"));
+    }
+
+    #[test]
+    fn insert_defaults_before_first_table() {
+        let text = "a = 1\n\n[t]\nb = 2\n";
+        let out = insert_before_first_table(text, "model = \"x\"\n");
+        let idx_model = out.find("model").unwrap();
+        let idx_table = out.find("[t]").unwrap();
+        assert!(idx_model < idx_table);
     }
 }

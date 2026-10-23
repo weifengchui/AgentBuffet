@@ -1,6 +1,7 @@
 //! AgentBuffet（Agent食堂）网关内核：M1 转发链路 + M2 故障转移 + M3 热重载与用量记账
 //! + M4 Web UI 与接入器管理面（设计文档 §8/§9）。
 
+pub mod autostart;
 pub mod config;
 pub mod failover;
 pub mod onboard;
@@ -60,6 +61,8 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
         .route("/_admin/import-enc", post(import_enc))
         .route("/api/agents/attach", post(agent_attach))
         .route("/api/agents/detach", post(agent_detach))
+        .route("/api/autostart", get(autostart_get))
+        .route("/_admin/autostart", post(autostart_set))
         .route("/_admin/reload", post(reload))
         .route("/_admin/routing", post(routing_edit))
         .route("/_admin/routing/test", post(routing_test))
@@ -78,9 +81,22 @@ pub fn agent_targets(snap: &config::Snapshot) -> Vec<onboard::Target> {
             agent_id: id.clone(),
             default_group: snap.agents[id].default_group.clone(),
             groups: groups.clone(),
+            models: routable_models(snap, &snap.agents[id].default_group),
             gateway_addr: snap.gateway_addr.to_string(),
         })
         .collect()
+}
+
+/// 组内可路由的真实模型（已排序去重），供注入器枚举可直接选择的模型。
+pub fn routable_models(snap: &config::Snapshot, group: &str) -> Vec<String> {
+    let mut v: Vec<String> = snap
+        .group_members(group)
+        .into_iter()
+        .map(|m| m.model.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 // ---------------------------------------------------------------- 守卫与响应
@@ -324,8 +340,9 @@ async fn agent_attach(
     gnames.sort();
     let target = onboard::Target {
         agent_id: req.agent_id.clone(),
-        default_group: group,
+        default_group: group.clone(),
         groups: gnames.into_iter().cloned().collect(),
+        models: routable_models(&snap, &group),
         gateway_addr: snap.gateway_addr.to_string(),
     };
     let res = if req.dry_run {
@@ -357,6 +374,51 @@ async fn agent_detach(
         Ok(r) => json_response(
             StatusCode::OK,
             serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({})),
+        ),
+        Err(e) => json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": e}),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------- 开机自启
+
+#[derive(Debug, Deserialize)]
+struct AutostartReq {
+    enable: bool,
+}
+
+async fn autostart_get(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    json_response(
+        StatusCode::OK,
+        serde_json::to_value(autostart::status(&st.home)).unwrap_or_else(|_| serde_json::json!({})),
+    )
+}
+
+async fn autostart_set(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(req): Json<AutostartReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let res = if req.enable {
+        autostart::enable(&st.home)
+    } else {
+        autostart::disable(&st.home)
+    };
+    match res {
+        Ok(s) => json_response(
+            StatusCode::OK,
+            serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({})),
         ),
         Err(e) => json_response(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -1534,6 +1596,7 @@ async fn agents_detect(
             agent_id: (*id).to_string(),
             default_group: String::new(),
             groups: Vec::new(),
+            models: Vec::new(),
             gateway_addr: snap.gateway_addr.to_string(),
         };
         let mut v = serde_json::to_value(onboard::detect(&st.home, &target))
