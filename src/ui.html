@@ -975,7 +975,12 @@ async function memberAct(b) {
   const g = state.groups.find(x => x.name === b.dataset.g); if (!g) return;
   let ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority, disabled: !!m.disabled }));
   const hit = (m) => m.provider === b.dataset.p && m.model === b.dataset.m;
-  if (b.dataset.act === "del") ms = ms.filter(m => !hit(m));
+  if (b.dataset.act === "del") {
+    if (!await confirmM(L("删除成员", "Remove member"),
+      L(`确定从路由组 ${b.dataset.g} 中删除 ${b.dataset.p}/${b.dataset.m}？删除后立即热重载。`,
+        `Remove ${b.dataset.p}/${b.dataset.m} from group ${b.dataset.g}? Hot-reload applies immediately.`))) return;
+    ms = ms.filter(m => !hit(m));
+  }
   else ms.forEach(m => { if (hit(m)) m.disabled = !m.disabled; });
   if (!ms.length) return toast(L("至少保留一个成员", "Keep at least one member"), "warn");
   try {
