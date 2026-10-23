@@ -35,6 +35,12 @@ impl MockState {
 
 /// mock provider：按 model 名分流故障行为，并统计命中次数供"跳过未触达"断言。
 async fn mock_chat(State(ms): State<MockState>, req: Request) -> Response {
+    let ae = req
+        .headers()
+        .get("accept-encoding")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let bytes = axum::body::to_bytes(req.into_body(), 1 << 20)
         .await
         .unwrap();
@@ -139,7 +145,9 @@ async fn mock_chat(State(ms): State<MockState>, req: Request) -> Response {
     }
     (
         StatusCode::OK,
-        axum::Json(serde_json::json!({"object": "chat.completion", "echo_model": model})),
+        axum::Json(
+            serde_json::json!({"object": "chat.completion", "echo_model": model, "echo_ae": ae}),
+        ),
     )
         .into_response()
 }
@@ -231,6 +239,34 @@ fn chain_of(r: &reqwest::Response) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string()
+}
+
+#[tokio::test]
+async fn client_accept_encoding_is_not_forwarded() {
+    // 回归：客户端带 br/zstd 的 Accept-Encoding 若透传给上游，上游回压缩流会被
+    // 网关原样发给客户端（reqwest 只解 gzip），导致 OpenCode 报流无 finish_reason。
+    let (mock, _ms) = spawn_mock().await;
+    let yaml = gw_config(
+        &[prov("good-1", &mock, &["ok-chat"], None)],
+        &[(1, "good-1", "ok-chat")],
+    );
+    let gw = spawn_gateway(&yaml).await;
+    let client = reqwest::Client::new();
+    let r = client
+        .post(format!("{gw}/hermes/v1/chat/completions"))
+        .header("accept-encoding", "br, zstd")
+        .json(&serde_json::json!({"model":"group/g","stream":false,"messages":[]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j: serde_json::Value = r.json().await.unwrap();
+    let ae = j["echo_ae"].as_str().unwrap_or("");
+    assert!(
+        !ae.contains("br") && !ae.contains("zstd"),
+        "客户端 Accept-Encoding 被透传: {ae}"
+    );
+    assert!(ae.contains("gzip"), "网关未声明自身可解编码: {ae:?}");
 }
 
 #[tokio::test]

@@ -887,6 +887,9 @@ fn is_hop_by_hop_or_strip(name: &HeaderName) -> bool {
         || name == HeaderName::from_static("proxy-authorization")
         || name == HeaderName::from_static("te")
         || name == HeaderName::from_static("trailer")
+        // 网关按自身能力（reqwest gzip）声明编码并重写响应体；
+        // 透传客户端 Accept-Encoding 会让上游回 br/zstd，压缩字节会原样漏给客户端
+        || name == header::ACCEPT_ENCODING
 }
 
 fn json_error(status: u16, message: &str) -> Response<Body> {
