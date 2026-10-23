@@ -165,6 +165,22 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+/* ---------------- starmap ---------------- */
+#ov-map { position: relative; height: 320px; border: 1px solid var(--line); border-radius: 10px; margin-top: 10px;
+  overflow: hidden; background:
+  radial-gradient(560px 300px at 50% 46%, rgba(79,140,255,.07), transparent 70%),
+  linear-gradient(rgba(108,168,255,.04) 1px, transparent 1px) 0 0/40px 40px,
+  linear-gradient(90deg, rgba(108,168,255,.04) 1px, transparent 1px) 0 0/40px 40px, #0a0f18; }
+#ov-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+#ov-stars { position: absolute; inset: 0; pointer-events: none; }
+#ov-stars i { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #cfe3ff;
+  opacity: .05; animation: twk 3s ease-in-out infinite alternate; }
+@keyframes twk { from { opacity: .03; } to { opacity: .25; } }
+#ov-map .lk { fill: none; stroke-width: 1.4; opacity: .16; transition: opacity .35s ease; }
+#ov-map .lk.live { opacity: .8; stroke-width: 2.1; filter: drop-shadow(0 0 4px rgba(160,210,255,.5)); }
+#ov-map .mlab { fill: #9aa7b8; font-size: 11px; text-anchor: middle; }
+.lgd { display: inline-flex; align-items: center; gap: 5px; }
+.lgd i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } aside { width: 62px; }
   body:not(.sb-collapsed) aside { width: 216px; } }
 </style>
@@ -199,6 +215,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
           <div class="stat"><div class="k" data-i18n="ov.pt"></div><div class="v" id="ov-pt">-</div></div>
           <div class="stat"><div class="k" data-i18n="ov.ct"></div><div class="v" id="ov-ct">-</div></div>
           <div class="stat"><div class="k" data-i18n="ov.cost"></div><div class="v" id="ov-cost">-</div></div>
+        </div>
+        <div class="panel">
+          <h3 data-i18n="ov.map"></h3>
+          <div class="muted" data-i18n="ov.mapHint"></div>
+          <div id="ov-map"><div id="ov-stars"></div><svg id="ov-svg" preserveAspectRatio="xMidYMid meet"></svg></div>
+          <div class="muted" id="ov-map-lg" style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
         </div>
         <div class="panel">
           <h3 data-i18n="ov.recent"></h3>
@@ -334,6 +356,7 @@ const I18N = {
     "col.tokens": "Tokens", "col.cost": "费用", "col.dur": "耗时", "col.chain": "失败链", "col.ops": "操作",
     "ov.req": "今日请求", "ov.pt": "输入 Tokens", "ov.ct": "输出 Tokens", "ov.cost": "费用估算",
     "ov.recent": "最近请求", "ov.recentHint": "按 UTC 日期统计，展示最近 20 条",
+    "ov.map": "链路星图", "ov.mapHint": "在线 Agent → 网关 → 服务商的实时链路；光点代表最近 60 秒内的请求",
     "pv.add": "添加服务商", "pv.hint": "API Key 仅存于本机 env 文件（0600），绝不写入配置",
     "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
     "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
@@ -363,6 +386,7 @@ const I18N = {
     "col.tokens": "Tokens", "col.cost": "Cost", "col.dur": "Duration", "col.chain": "Fail chain", "col.ops": "Actions",
     "ov.req": "Requests today", "ov.pt": "Prompt tokens", "ov.ct": "Completion tokens", "ov.cost": "Est. cost",
     "ov.recent": "Recent requests", "ov.recentHint": "UTC day, last 20 requests",
+    "ov.map": "Link star map", "ov.mapHint": "Live agent → gateway → provider links; photons mark requests from the last 60 seconds",
     "pv.add": "Add provider", "pv.hint": "API keys live only in the local env file (0600), never in config",
     "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
     "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
@@ -476,6 +500,7 @@ function switchView(v) {
   document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
   $("v-" + v).classList.add("on");
   $("tb-title").textContent = t("nav." + v);
+  if (v === "overview") startMap(); else stopMap();
   window[LOADERS[v]]();
 }
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => switchView(b.dataset.v));
@@ -484,6 +509,7 @@ $("collapse-btn").onclick = () => {
   $("collapse-btn").querySelector("svg").style.transform = document.body.classList.contains("sb-collapsed") ? "rotate(180deg)" : "";
 };
 $("lang-btn").onclick = toggleLang;
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopMap(); else if (curView === "overview") startMap(); });
 
 // ---------------- overview ----------------
 async function loadOverview() {
@@ -506,7 +532,106 @@ async function loadOverview() {
     </tr>`).join("")
       || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
     return true;
+    loadMap();
+    return true;
   } catch (err) { toast(err.message, "bad"); return false; }
+}
+// ---------------- starmap ----------------
+const PCOL = { ok: "#3fb950", degraded: "#f85149", circuit_open: "#d29922", quota_exhausted: "#d29922", disabled: "#50607a" };
+let mapTimer = null, mapFired = new Set(), mapLive = {}, mapNodes = null, mapStars = false;
+const photons = []; let phRaf = null;
+const hashK = (s) => { let h = 17; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 2654435761); return Math.abs(h); };
+const ctrl = (p1, p2, k) => { const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2, dx = p2.x - p1.x, dy = p2.y - p1.y, L = Math.hypot(dx, dy) || 1, bow = 24 + (hashK(k) % 20); return { x: mx + (-dy / L) * bow, y: my + (dx / L) * bow }; };
+const chanD = (p1, c, p2) => `M ${p1.x} ${p1.y} Q ${c.x} ${c.y} ${p2.x} ${p2.y}`;
+const qp = (p1, c, p2, u) => { const it = 1 - u; return { x: it * it * p1.x + 2 * it * u * c.x + u * u * p2.x, y: it * it * p1.y + 2 * it * u * c.y + u * u * p2.y }; };
+function startMap() { stopMap(); loadMap(); mapTimer = setInterval(loadMap, 3000); }
+function stopMap() { if (mapTimer) { clearInterval(mapTimer); mapTimer = null; } }
+async function loadMap() {
+  if (document.hidden) return;
+  try {
+    const [agents, routing, providers, ov] = await Promise.all([
+      api("/api/agents"), api("/api/routing"), api("/api/providers"), api("/api/overview"),
+    ]);
+    drawMap(agents.filter(a => a.attached), routing.groups || [], providers, ov.recent || []);
+  } catch (e) { /* 星图不可用时静默 */ }
+}
+function drawMap(agents, groups, providers, recent) {
+  const svg = $("ov-svg"); if (!svg) return;
+  if (!mapStars) { mapStars = true; let st = ""; for (let i = 0; i < 46; i++) st += `<i style="left:${(Math.random()*100).toFixed(2)}%;top:${(Math.random()*100).toFixed(2)}%;animation-duration:${(2+Math.random()*3).toFixed(2)}s;animation-delay:${(Math.random()*3).toFixed(2)}s"></i>`; $("ov-stars").innerHTML = st; }
+  const W = 1000, H = 320, cx = W / 2, cy = H / 2;
+  const pvIds = [...new Set(groups.flatMap(g => g.members.map(m => m.provider)))];
+  const pvs = pvIds.map(id => providers.find(x => x.id === id) || { id, status: "disabled" });
+  const pos = { gw: { x: cx, y: cy } };
+  const yAt = (i, n) => (H + 70) * (i + 1) / (n + 1) - 15;
+  agents.forEach((a, i) => pos["ag:" + a.agent_id] = { x: 132, y: yAt(i, agents.length) });
+  pvs.forEach((x, i) => pos["pv:" + x.id] = { x: W - 132, y: yAt(i, pvs.length) });
+  mapNodes = pos;
+  const now = Date.now() / 1000;
+  for (const k in mapLive) if (mapLive[k] < now) delete mapLive[k];
+  let h = "";
+  const link = (k1, k2, col) => { const p1 = pos[k1], p2 = pos[k2], key = k1 + "=>" + k2;
+    return `<path class="lk${mapLive[key] ? " live" : ""}" data-k="${key}" d="${chanD(p1, ctrl(p1, p2, key), p2)}" stroke="${col}"/>`; };
+  for (const a of agents) h += link("ag:" + a.agent_id, "gw", "#38d6e6");
+  for (const x of pvs) h += link("gw", "pv:" + x.id, PCOL[x.status] || "#50607a");
+  h += `<g><circle cx="${cx}" cy="${cy}" r="30" fill="rgba(79,140,255,.08)" stroke="rgba(127,176,255,.35)"/>
+    <circle cx="${cx}" cy="${cy}" r="18" fill="#101a2e" stroke="#7fb0ff" stroke-width="1.5"/>
+    <circle cx="${cx}" cy="${cy}" r="5" fill="#4f8cff"><animate attributeName="opacity" values="1;.35;1" dur="2.6s" repeatCount="indefinite"/></circle>
+    <text class="mlab" x="${cx}" y="${cy+48}">Gateway</text></g>`;
+  for (const a of agents) {
+    const p = pos["ag:" + a.agent_id], col = a.drifted ? "#d29922" : "#38d6e6";
+    const nm = a.agent_id.length > 11 ? a.agent_id.slice(0, 10) + "…" : a.agent_id;
+    h += `<g><rect x="${p.x-54}" y="${p.y-13}" width="108" height="26" rx="13" fill="#13233a" stroke="${col}" stroke-width="1.2"/>
+      <text x="${p.x}" y="${p.y+4}" text-anchor="middle" fill="#dcecf8" font-size="11.5">${esc(nm)}</text>
+      <title>${esc(a.agent_id)} · ${esc(a.default_group || "-")}${a.drifted ? " · " + esc(L("漂移", "drifted")) : ""}</title></g>`;
+  }
+  for (const q of pvs) {
+    const p = pos["pv:" + q.id], col = PCOL[q.status] || "#50607a";
+    const nm = q.id.length > 12 ? q.id.slice(0, 11) + "…" : q.id;
+    h += `<g><circle cx="${p.x}" cy="${p.y}" r="12" fill="#0d1522" stroke="${col}" stroke-width="1.6"/>
+      <circle cx="${p.x}" cy="${p.y}" r="4" fill="${col}"/>
+      <text class="mlab" x="${p.x}" y="${p.y+28}">${esc(nm)}</text>
+      <title>${esc(q.id)} · ${esc(stLabel(q.status))}</title></g>`;
+  }
+  if (!agents.length) h += `<text class="mlab" x="${cx}" y="40" fill="#6b7d94">${esc(L("暂无在线 Agent：到「接入器」接入后，链路将实时点亮", "No online agents yet — attach one under Agents to light up the map"))}</text>`;
+  h += `<g id="ph"></g>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = h;
+  const ph = $("ph"); for (const e of photons) ph.appendChild(e.el);
+  $("ov-map-lg").innerHTML = [["#38d6e6", L("活跃链路", "live link")], ["#3fb950", L("服务商正常", "provider ok")],
+    ["#d29922", L("熔断 / 额度", "circuit / quota")], ["#f85149", L("降级", "degraded")], ["#50607a", L("停用", "disabled")]]
+    .map(([c, t2]) => `<span class="lgd"><i style="background:${c}"></i>${esc(t2)}</span>`).join("");
+  for (const e of recent) {
+    const key = `${e.ts}|${e.agent}|${e.provider}|${e.model}`;
+    if (mapFired.has(key)) continue;
+    mapFired.add(key);
+    if (now - e.ts > 60 || now - e.ts < -2) continue;
+    const k1 = "ag:" + e.agent, k2 = "pv:" + e.provider;
+    if (!pos[k1] || !pos[k2]) continue;
+    const lk1 = k1 + "=>gw", lk2 = "gw=>" + k2;
+    mapLive[lk1] = now + 60; mapLive[lk2] = now + 60;
+    for (const k of [lk1, lk2]) { const el = svg.querySelector(`[data-k="${CSS.escape(k)}"]`); if (el) el.classList.add("live"); }
+    spawnPhoton(pos[k1], pos[k2], e.status < 400 ? "#38d6e6" : "#f85149", lk1, lk2);
+  }
+  if (mapFired.size > 500) mapFired.clear();
+}
+function spawnPhoton(a, b, color, k1, k2) {
+  const ph = $("ph"), g = mapNodes && mapNodes.gw; if (!ph || !g) return;
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  el.setAttribute("r", "3.5"); el.setAttribute("fill", "#fff");
+  el.style.filter = `drop-shadow(0 0 5px ${color}) drop-shadow(0 0 11px ${color})`;
+  ph.appendChild(el);
+  photons.push({ el, a, g, b, c1: ctrl(a, g, k1), c2: ctrl(g, b, k2), t0: performance.now(), dur: 1600 });
+  if (!phRaf) phTick();
+}
+function phTick() {
+  const t = performance.now();
+  for (let i = photons.length - 1; i >= 0; i--) {
+    const p = photons[i], u = (t - p.t0) / p.dur;
+    if (u >= 1) { p.el.remove(); photons.splice(i, 1); continue; }
+    const pt = u < 0.5 ? qp(p.a, p.c1, p.g, u * 2) : qp(p.g, p.c2, p.b, (u - 0.5) * 2);
+    p.el.setAttribute("cx", pt.x); p.el.setAttribute("cy", pt.y);
+  }
+  phRaf = photons.length ? requestAnimationFrame(phTick) : null;
 }
 </script>
 <script>
@@ -1105,6 +1230,7 @@ async function copyConfig() {
 (async function init() {
   try { state.gw = (await api("/api/config")).gateway; } catch (e) { /* loopback only */ }
   applyLang();
+  startMap();
 })();
 </script>
 </body>
