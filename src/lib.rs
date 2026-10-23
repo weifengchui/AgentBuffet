@@ -432,6 +432,7 @@ async fn autostart_set(
 /// 热重载核心（§5）：校验失败 422（带文件名），旧快照继续服务；
 /// 成功则 swap 快照、复位 degraded/熔断（保留额度计数）、重读单价表（counters 保留）。
 async fn do_reload(st: &proxy::AppState) -> (StatusCode, serde_json::Value) {
+    load_env_file(&st.env_file);
     let Some(path) = &st.config_path else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1613,6 +1614,22 @@ async fn agents_detect(
 }
 
 // ---------------------------------------------------------------- 加密备份
+
+/// 把 env 文件载入进程环境：仅补充当前未设置的变量（启动方显式导出的值优先）。
+/// 启动与热重载各调用一次，Key 填进文件后 reload 即生效，degraded 随重载复位。
+pub fn load_env_file(env_file: &std::path::Path) -> usize {
+    let mut n = 0;
+    for (k, v) in read_env_pairs(env_file) {
+        if k.is_empty() {
+            continue;
+        }
+        if std::env::var_os(&k).is_none() {
+            std::env::set_var(&k, v);
+            n += 1;
+        }
+    }
+    n
+}
 
 fn read_env_pairs(path: &std::path::Path) -> Vec<(String, String)> {
     std::fs::read_to_string(path)
