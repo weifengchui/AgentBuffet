@@ -174,6 +174,8 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
 .gcard .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
+.gcard tbody tr { cursor: grab; }
+.gcard tbody tr.dragover td { background: rgba(79,140,255,.14); }
 .gcard.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; }
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
 /* ---------------- starmap ---------------- */
@@ -877,15 +879,41 @@ async function loadRouting() {
             <button class="btn sm danger" onclick="delGroup('${esc(g.name)}')">${esc(L("删除", "Delete"))}</button>
           </div></div>
         <table><thead><tr><th>#</th><th data-i18n="col.provider"></th><th>Model</th><th data-i18n="col.status"></th></tr></thead>
-        <tbody>${g.members.map(m => `<tr><td class="muted">${m.priority}</td><td>${esc(m.provider)}</td>
+        <tbody>${g.members.map(m => `<tr data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}" title="${esc(L("拖动调整组内优先级", "Drag to reorder priority"))}"><td class="muted">${m.priority}</td><td>${esc(m.provider)}</td>
           <td><code>${esc(m.model)}</code></td>
           <td>${m.disabled ? `<span class="pill dim"><i></i>${esc(L("已停用", "disabled"))}</span>` : `<span class="pill on"><i></i>${esc(L("可用", "ready"))}</span>`}</td></tr>`).join("")}</tbody></table>
       </div>`).join("")
       || `<div class="empty"><div class="big">🧭</div><b>${esc(L("还没有路由组", "No routing groups yet"))}</b>${esc(L("路由组 = 一组「服务商 + 模型」的优先级列表，故障时自动转移", "A group is a prioritized list of provider/model pairs with automatic failover"))}</div>`;
     document.querySelectorAll("#rt-grid [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
     wireGroupDrag();
+    wireMemberRows();
     return true;
   } catch (err) { toast(err.message, "bad"); return false; }
+}
+
+function wireMemberRows() {
+  let rowDrag = null;
+  document.querySelectorAll("#rt-grid tbody tr").forEach(row => {
+    row.draggable = true;
+    row.ondragstart = (e) => { rowDrag = row; e.dataTransfer.effectAllowed = "move"; };
+    row.ondragend = () => { rowDrag = null; };
+    row.ondragover = (e) => { if (!rowDrag || rowDrag.dataset.g !== row.dataset.g) return; e.preventDefault(); row.classList.add("dragover"); };
+    row.ondragleave = () => row.classList.remove("dragover");
+    row.ondrop = async (e) => {
+      e.preventDefault(); row.classList.remove("dragover");
+      const from = rowDrag; rowDrag = null;
+      if (!from || from === row) return;
+      const rows = [...row.parentElement.querySelectorAll("tr")];
+      const fi = rows.indexOf(from), ti = rows.indexOf(row);
+      rows.splice(ti, 0, rows.splice(fi, 1)[0]);
+      const members = rows.map((r, i) => ({ provider: r.dataset.p, model: r.dataset.m, priority: i + 1 }));
+      try {
+        await post("/_admin/routing", { group: row.dataset.g, members });
+        toast(L("优先级顺序已保存并热重载", "Priority order saved & hot-reloaded"), "ok");
+      } catch (err) { toast(err.message, "bad"); }
+      loadRouting();
+    };
+  });
 }
 
 function wireGroupDrag() {
