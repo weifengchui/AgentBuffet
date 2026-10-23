@@ -109,6 +109,8 @@ async fn ui_index(ConnectInfo(peer): ConnectInfo<SocketAddr>) -> Response<Body> 
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
+    r.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     r
 }
 
