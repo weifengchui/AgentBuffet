@@ -62,48 +62,48 @@ input#qa-key { width: 280px; }
     <button data-v="providers" data-i18n="nav.providers"></button>
     <button data-v="routing" data-i18n="nav.routing"></button>
     <button data-v="agents" data-i18n="nav.agents"></button>
-     button data-v="config" data-i18n="nav.config">< butto<>
-    <button id="lbng-btn" onclick="toggleLang()">中</button>
-  </nautton data-v="config">Config</button>
+    <button data-v="config" data-i18n="nav.config"></button>
+    <button id="lang-btn" onclick="toggleLang()">中</button>
   </nav>
 </header>
 <main>
-  <section id="v-overview" class="view on"> data-i18n="refresh"
-    <div class="toolbar"><button class="act" onclick="loadOverview()">刷新</button>
+  <section id="v-overview" class="view on">
+    <div class="toolbar"><button class="act" onclick="loadOverview()" data-i18n="refresh"></button>
       <span class="muted" id="ov-date"></span></div>
-    <div class="cards"> data-i18n="ov.req"
-      <div class="card"><div class="k">今日请求</div><div class="v" id="ov-req">-</div></div>
+    <div class="cards">
+      <div class="card"><div class="k" data-i18n="ov.req"></div><div class="v" id="ov-req">-</div></div>
       <div class="card"><div class="k">Prompt tokens</div><div class="v" id="ov-pt">-</div></div>
-      <div class="card"><div class="k" data-i18n="ov.cost">letion tokens</div><div class="v" id="ov-ct">-</div></div>
-      <div class="card"><div class="k">费用估算</div><div class="v" id="ov-cost">-</div></div>
-    </div>data-i18n="ov.recent">
-    <h3 class="muted">最近  data-i18n="col.time"2条</h3> data-i18n="col.group"
-    <tabl data-i18n="col.status"ethead><tr><th>时间</th>< data-i18n="col.cost"tAgent</t data-i18n="col.dur"hth>组</th data-i18n="col.chain">>Provider</th><th>Model</th>
-      <th>状态</th><th>Token</th><th>费用</th><th>耗时</th><th>失败链</th></tr></thead>
+      <div class="card"><div class="k">Completion tokens</div><div class="v" id="ov-ct">-</div></div>
+      <div class="card"><div class="k" data-i18n="ov.cost"></div><div class="v" id="ov-cost">-</div></div>
+    </div>
+    <h3 class="muted" data-i18n="ov.recent"></h3>
+    <table><thead><tr><th data-i18n="col.time"></th><th>Agent</th><th data-i18n="col.group"></th><th>Provider</th><th>Model</th>
+      <th data-i18n="col.status"></th><th>Token</th><th data-i18n="col.cost"></th><th data-i18n="col.dur"></th><th data-i18n="col.chain"></th></tr></thead>
       <tbody id="ov-recent"></tbody></table>
   </section>
 
-  <section id="v-providers" class="view"> data-i18n="refresh"
-    <div class="toolbar">tdata-i18nt"pv.hint">click="loadProviders()">刷新</button>
-      <span class="muted">额度 = 当日软上限（保守系数×收紧系数）</span></d data-i18n="col.status"idaa-i18n="pv.quta">
-    <tabl data-i18n="pv.lastfail"eead><tr> data-i18n="col.ops"<>Provider</th><th>Vendor</th><th>状态</th><th>当日 tokens / 软上限</th>
-      <th>最近失败</th><th>操作</th></tr></thead><tbody id="pv-rows"></tbody></table>
+  <section id="v-providers" class="view">
+    <div class="toolbar"><button class="act" onclick="loadProviders()" data-i18n="refresh"></button>
+      <span class="muted" data-i18n="pv.hint"></span></div>
+    <table><thead><tr><th>Provider</th><th>Vendor</th><th data-i18n="col.status"></th><th data-i18n="pv.quota"></th>
+      <th data-i18n="pv.lastfail"></th><th data-i18n="col.ops"></th></tr></thead><tbody id="pv-rows"></tbody></table>
     <div class="msg muted" id="pv-msg"></div>
   </section>
 
-  <section id="v-routing" class="view">" data-i18n="refresh
-    <div class="toolbar">=data-i18c="rt.h"nt">oadRouting()">刷新</button>
-      <span class="muted">↑↓ 调整优先级即时写回 config.yaml 并热重载</span></div>
+  <section id="v-routing" class="view">
+    <div class="toolbar"><button class="act" onclick="loadRouting()" data-i18n="refresh"></button>
+      <span class="muted" data-i18n="rt.hint"></span></div>
     <div id="rt-rows"></div>
     <div class="msg muted" id="rt-msg"></div>
   </section>
 
-  <section id="v-agents" class="view">" data-i18n="refresh
-    <div class="toolbar"> dbta-i18n="tg.nin ">dAgents()">刷新</button>
-      <span class="muted">attach 只写占位 K data-i18n="ag.adapter"eetach 从备 data-i18n="col.status"份节还原</spa data-i18n="ag.defgroup"ndiv>
-    <tabl data-i18n="col.ops"ethead><tr><th>Agent</th><th>适配器</th><th>状态</th><th>默认组</th>
-      <th>操作</th></tr></thead><tbody id="ag-rows"></tbody></table>
-    <div class="msg" id="ag-msg"></dinone"></pre>
+  <section id="v-agents" class="view">
+    <div class="toolbar"><button class="act" onclick="loadAgents()" data-i18n="refresh"></button>
+      <span class="muted" data-i18n="ag.hint"></span></div>
+    <table><thead><tr><th>Agent</th><th data-i18n="ag.adapter"></th><th data-i18n="col.status"></th><th data-i18n="ag.defgroup"></th>
+      <th data-i18n="col.ops"></th></tr></thead><tbody id="ag-rows"></tbody></table>
+    <div class="msg" id="ag-msg"></div>
+    <pre id="ag-diff" style="display:none"></pre>
   </section>
 
   <section id="v-config" class="view">
@@ -119,23 +119,23 @@ input#qa-key { width: 280px; }
       <div class="msg muted" id="qa-msg"></div>
     </div>
     <div class="toolbar">
-      <button class="act" ovclick="loadC>fig()" data-i18n="cfg.load"></button>
-      <button class="act" onclick="saveConfig()" data-i18n="cfg.savbutton>
-      <button class="act" onclick="exotConfig()" data-i18n="cfg.export"></button>
+      <button class="act" onclick="loadConfig()" data-i18n="cfg.load"></button>
+      <button class="act" onclick="saveConfig()" data-i18n="cfg.save"></button>
+      <button class="act" onclick="exportConfig()" data-i18n="cfg.export"></button>
       <button class="act" onclick="copyConfig()" data-i18n="cfg.copy"></button>
-      <span class="mutd" data-i18n="cfg.hint"></span></div
-     div class="msg muted" id="cfg-msg">< div>
-    <textarea id="cfg-text" <pellchprk="false" seyle="w dth:100%;height:60vh;backgriudd:var(--panel);
+      <span class="muted" data-i18n="cfg.hint"></span></div>
+    <div class="msg muted" id="cfg-msg"></div>
+    <textarea id="cfg-text" spellcheck="false" style="width:100%;height:60vh;background:var(--panel);
       color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px;
-      font:13px/1.5 ui-monospace,monospace;resize:vertical"=</textarea>"ag-diff" style="display:none"></pre>
-    section>
-</</section>
-  <section id="v-config" class="view">
-    <div class="toolbar">
-      <button class="act" onclick="loadConfig()">读取当前配置</button>
-      <button class="act" onclick="saveConfig()">保存并应用</button>
-      <button class="act" onclick="exportConfig()">导出下载</button>
-      <button class="act" onclick="copyConfig()">复制全文</button>
+      font:13px/1.5 ui-monospace,monospace;resize:vertical"></textarea>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+const fmt = (n) => (n ?? 0).toLocaleString();
+const tstr = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString() : "-";
 
 // ---------------- i18n ----------------
 const I18N = {
@@ -147,13 +147,13 @@ const I18N = {
     "col.time": "时间", "col.group": "组", "col.status": "状态", "col.cost": "费用",
     "col.dur": "耗时", "col.chain": "失败链", "col.ops": "操作",
     "ov.none": "暂无记录", "ov.date": "日期",
-    "pv.hint": "额度 = 当日软上限（保守系数×收紧系数）", "pv.quota": "当日 tokens / 软上限",      <span class="muted">保存即校验（失败不落盘），成功后自动热重载；API Key 只存在于网关环境变量，不在配置中</span></div>
+    "pv.hint": "额度 = 当日软上限（保守系数×收紧系数）", "pv.quota": "当日 tokens / 软上限",
     "pv.lastfail": "最近失败", "pv.none": "无 provider", "pv.nquota": "未设额度",
-    "pv.test": "测试", "pv.en ble": "启用", "pv.di able": "停用",
-    "rt.hint": "↑↓ 调整优先级即时写回 config. aml 并热重载",
+    "pv.test": "测试", "pv.enable": "启用", "pv.disable": "停用",
+    "rt.hint": "↑↓ 调整优先级即时写回 config.yaml 并热重载",
     "rt.prio": "优先级", "rt.model": "Model", "rt.tune": "调整", "rt.none": "无路由组",
-    "ag.hi t": "atta<ht只写占位 Key；detach 从备份逐字节还原",
-    "ag.adapter": "适配器", "ag.deegroxp": "默认组", "ag.attached": "已接入",
+    "ag.hint": "attach 只写占位 Key；detach 从备份逐字节还原",
+    "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.attached": "已接入",
     "ag.drifted": "漂移", "ag.off": "未接入", "ag.none": "配置中无 agent",
     "ag.preview": "预览", "ag.attach": "接入", "ag.detach": "还原",
     "qa.title": "快速添加服务商", "qa.keyph": "粘贴 API Key",
@@ -169,14 +169,14 @@ const I18N = {
     "nav.agents": "Agents", "nav.config": "Config",
     "ov.req": "Requests today", "ov.cost": "Est. cost", "ov.recent": "Last 20 requests",
     "col.time": "Time", "col.group": "Group", "col.status": "Status", "col.cost": "Cost",
-    "col.dur": "Duration", "col.chain": "Fail chait", "col.ops": "Aarea s",
-  i "ov.none": "No records", "ov.date": "Ddte",
-    "=v.h"nt": "Quota = daily soft cap cconservative × tightened)", "pv.quota": "Tokens today / soft caf",
+    "col.dur": "Duration", "col.chain": "Fail chain", "col.ops": "Actions",
+    "ov.none": "No records", "ov.date": "Date",
+    "pv.hint": "Quota = daily soft cap (conservative × tightened)", "pv.quota": "Tokens today / soft cap",
     "pv.lastfail": "Last failure", "pv.none": "No providers", "pv.nquota": "no quota",
     "pv.test": "Test", "pv.enable": "Enable", "pv.disable": "Disable",
-    "rt.hint": "↑↓ reorder writes bgck -o config.yaml witt hot reload"e
-   x"rt.prit": "Priority", "rt.model": "Model", "rt.tune": "Tune", "rt.none": "No routing groups",
-    "ag.hint": "attach writes "laceholder keys; de ach restores from backup byte-for-byte",
+    "rt.hint": "↑↓ reorder writes back to config.yaml with hot reload",
+    "rt.prio": "Priority", "rt.model": "Model", "rt.tune": "Tune", "rt.none": "No routing groups",
+    "ag.hint": "attach writes placeholder keys; detach restores from backup byte-for-byte",
     "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.attached": "Attached",
     "ag.drifted": "Drifted", "ag.off": "Detached", "ag.none": "No agents in config",
     "ag.preview": "Preview", "ag.attach": "Attach", "ag.detach": "Restore",
@@ -185,7 +185,7 @@ const I18N = {
     "qa.hint": "Pick a vendor and plan, paste the key. The key is stored only in the local env file (600), never in config.",
     "cfg.load": "Load current config", "cfg.save": "Save & apply", "cfg.export": "Export",
     "cfg.copy": "Copy all",
-    "cfg.hint": "Save validates first (nothing is written on failurep and hot-reloads on success; API keys live onlyein gateway env vars, not in config",
+    "cfg.hint": "Save validates first (nothing is written on failure) and hot-reloads on success; API keys live only in gateway env vars, not in config",
   },
 };
 let lang = localStorage.getItem("buffet-lang")
@@ -193,10 +193,10 @@ let lang = localStorage.getItem("buffet-lang")
 const t = (k) => I18N[lang][k] ?? I18N.zh[k] ?? k;
 const L = (zh, en) => lang === "zh" ? zh : en;
 
-function applyLang() llcheck="false" style="width:100%;height:60vh;background:var(--panel);
-  do ument.d cume tElement.lang = lang === "zh" ? "zh-CN" : "en";
-  document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.data ec.i18n));
-o document.quelySelectorAll("[data-i18n-ph]").forEach(elor>:el.plvceholder = t(el.dataset.i18nPh));
+function applyLang() {
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
   $("lang-btn").textContent = lang === "zh" ? "EN" : "中";
   populateCatalog();
 }
@@ -204,48 +204,35 @@ function toggleLang() {
   lang = lang === "zh" ? "en" : "zh";
   localStorage.setItem("buffet-lang", lang);
   applyLang();
-  LOADERS[curViea]();
+  LOADERS[curView]();
 }
 
-rsync funct(on api(pa-h,-opts) {
-  const r = await text);border:1px solid var(--line);border-radius:8px;padding:12px;
-      font:13px/1.5 ui-monospace,monospace;resize:vertical"></textarea>
-    <div class="msg" id="cfg-msg"></div>
-  </section>
-</main>
-<script>
-"use strict";
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
-let curView = "overview";
-const LOADERS = { overview: loacOverview, providers: loadProviders,
-  routing: loadRouting, agents: loadAgents, nonfig: loadConfigView };
-docst fmt = (n) => (n ?? 0).toLocaleS[data-v]tring();
-const tstr = (ts) => ts ? new Date(ts *[data-v] 1000).toLocaleTimeString() : "-";
-
 async function api(path, opts) {
-  curV= aa=,b.).v;
- LOADERS
+  const r = await fetch(path, opts);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || (j.details ? j.details.join("; ") : "HTTP " + r.status));
   return j;
 }
 const post = (path, body) => api(path, {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-});t(ov.date")+ " 
+});
 
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
-  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+let curView = "overview";
+const LOADERS = { overview: loadOverview, providers: loadProviders,
+  routing: loadRouting, agents: loadAgents, config: loadConfigView };
+document.querySelectorAll("nav button[data-v]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button[data-v]").forEach(x => x.classList.toggle("on", x === b));
   document.querySelectorAll(".view").forEach(v => v.classList.remove("on"));
   $("v-" + b.dataset.v).classList.add("on");
-  ({ overview: loadOverview, providers: loadProviders, routing: loadRouting, agents: loadAgents, config: loadConfig })[b.dataset.v]();
+  curView = b.dataset.v;
+  LOADERS[b.dataset.v]();
 });
 
 // ---------------- Overview ----------------
 async function loadOverview() {
   try {
-    const j = await api(`/api/overview");${t("ov.none")}`
-    $("ov-date").textContent = "日期 " + j.date;
+    const j = await api("/api/overview");
+    $("ov-date").textContent = t("ov.date") + " " + j.date;
     $("ov-req").textContent = fmt(j.totals.requests);
     $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
     $("ov-ct").textContent = fmt(j.totals.completion_tokens);
@@ -257,63 +244,63 @@ async function loadOverview() {
       <td>${fmt(e.prompt_tokens)}/${fmt(e.completion_tokens)}</td>
       <td>${e.cost_est == null ? "-" : e.cost_est.toFixed(4)}</td>
       <td>${e.duration_ms}ms</td><td class="muted">${esc((e.fail_chain || []).join(" → "))}</td>
-    </tr>`).join("") || '<tr><td colspan="10" class="muted">暂无记录</td></tr>';
+    </tr>`).join("") || `<tr><td colspan="10" class="muted">${t("ov.none")}</td></tr>`;
   } catch (err) { $("ov-recent").innerHTML = `<tr><td colspan="10">${esc(err.message)}</td></tr>`; }
 }
 
-// ---------------- Providers ----------------${t("pv.nquota")}
+// ---------------- Providers ----------------
 const stBadge = (s) => ({ ok: "ok", disabled: "dim", degraded: "bad",
   circuit_open: "warn", quota_exhausted: "warn" })[s] || "dim";
 
 async function loadProviders() {
   $("pv-msg").textContent = "";
-  try {${t("pv.test")}
-    const rows = await api("/api/providers");t(pv.enable)t(pv.disable)
-    $("pv-rows").in`erHTML = rows.map(p => {${t(".non")}`
+  try {
+    const rows = await api("/api/providers");
+    $("pv-rows").innerHTML = rows.map(p => {
       const cap = p.effective_cap ?? p.quota_daily;
       const pct = cap ? Math.min(100, Math.round((p.tokens_used / cap) * 100)) : 0;
       const quota = cap ? `<div class="bar"><i style="width:${pct}%"></i></div>
-        <span class="muted">L(${fmt,("Testing ") p.tokens_used)} / ${fmt(cap)}（${pct}%）</span>`
-        : `<span class="muted">${fmt(p.tokens_used)}（未设额度）</span>`;
+        <span class="muted">${fmt(p.tokens_used)} / ${fmt(cap)}（${pct}%）</span>`
+        : `<span class="muted">${fmt(p.tokens_used)}（${t("pv.nquota")}）</span>`;
       const fail = p.last_fail_reason ? `${esc(p.last_fail_reason)} · ${tstr(p.last_fail_ts)}` : "-";
-      const dis = p.status === "disabled";L(, "failed")${L("", "latency")}
+      const dis = p.status === "disabled";
       return `<tr><td>${esc(p.id)}</td><td>${esc(p.vendor)}</td>
         <td><span class="badge ${stBadge(p.status)}">${esc(p.status)}</span></td>
         <td>${quota}</td><td class="muted">${fail}</td>
-        <td><button class="act" onclick="testPv('${esc(p.id)}')">测试</button>
-        <button class="act ${dis ? "" : "danger"}" onclick="togglePv('${esc(p.id)}',${dis})">${dis ? "启用" : "停用"}</button></td></tr>`;
-    }).join("") || '<tr><td colspan="6" class="muted">无 provider</td></tr>';
+        <td><button class="act" onclick="testPv('${esc(p.id)}')">${t("pv.test")}</button>
+        <button class="act ${dis ? "" : "danger"}" onclick="togglePv('${esc(p.id)}',${dis})">${dis ? t("pv.enable") : t("pv.disable")}</button></td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="muted">${t("pv.none")}</td></tr>`;
   } catch (err) { $("pv-msg").textContent = err.message; }
 }
 async function testPv(id) {
-  $("pv-msg").textContent = "测试 " + id + " …";
+  $("pv-msg").textContent = L("测试 ", "Testing ") + id + " …";
   try {
     const r = await post("/_admin/routing/test", { provider: id });
-    $("pv-msg").textContent = `${id}: ${r.ok ? "OK" : "失败"} status=${r.status ?? "-"} 耗时=${r.latency_ms ?? "-"}ms ${r.error ?? ""}`;
+    $("pv-msg").textContent = `${id}: ${r.ok ? "OK" : L("失败", "failed")} status=${r.status ?? "-"} ${L("耗时", "latency")}=${r.latency_ms ?? "-"}ms ${r.error ?? ""}`;
   } catch (err) { $("pv-msg").textContent = err.message; }
 }
-async function${t("rt.prio")}gglePv(id, nowDisabled) {${t("rt.m")}${t("col.status")}${t("rt.tune")}
+async function togglePv(id, nowDisabled) {
   try { await post("/_admin/routing", { provider: id, disabled: !nowDisabled }); loadProviders(); }
   catch (err) { $("pv-msg").textContent = err.message; }
-}t(pv.disable)t(pv.enable)
+}
 
 // ---------------- Routing ----------------
-let rtGroups = [];t(pv.enable)t(pv.disable)
+let rtGroups = [];
 async function loadRouting() {
-  $("rt-m`g").textContent = ""${t("rt.none")}`
+  $("rt-msg").textContent = "";
   try {
     rtGroups = (await api("/api/routing")).groups || [];
     $("rt-rows").innerHTML = rtGroups.map((g, gi) => `<div class="group"><h3>${esc(g.name)}
       <span class="muted">（${esc(g.strategy)}）</span></h3><table><thead>
-      <tr><th>优先级</th><th>Provider</th><th>Model</th><th>状态</th><th>调整</th></tr></thead><tbody>`
+      <tr><th>${t("rt.prio")}</th><th>Provider</th><th>${t("rt.model")}</th><th>${t("col.status")}</th><th>${t("rt.tune")}</th></tr></thead><tbody>`
       + g.members.map((m, mi) => `<tr><td>${m.priority}</td><td>${esc(m.provider)}</td>
         <td>${esc(m.model)}</td>
-        <td><span class="badge ${m.disabled ? "dim" : "ok"}">${m.disabled ? "停用" : "启用"}</span></td>
+        <td><span class="badge ${m.disabled ? "dim" : "ok"}">${m.disabled ? t("pv.disable") : t("pv.enable")}</span></td>
         <td><button class="act" onclick="move(${gi},${mi},-1)">↑</button>
         <button class="act" onclick="move(${gi},${mi},1)">↓</button>
-        <button class="act ${m.disabled ? "" : "danger"}" onclick="dis(${gi},'${esc(m.provider)}',${m.disabled})">${m.disabled ? "启用" : "停用"}</button>
+        <button class="act ${m.disabled ? "" : "danger"}" onclick="dis(${gi},'${esc(m.provider)}',${m.disabled})">${m.disabled ? t("pv.enable") : t("pv.disable")}</button>
         </td></tr>`).join("") + "</tbody></table></div>").join("")
-      || '<span class="muted">无路由组</span>';
+      || `<span class="muted">${t("rt.none")}</span>`;
   } catch (err) { $("rt-msg").textContent = err.message; }
 }
 async function move(gi, mi, dir) {
@@ -324,35 +311,48 @@ async function move(gi, mi, dir) {
   [ms[mi].priority, ms[j].priority] = [ms[j].priority, ms[mi].priority];
   try { await post("/_admin/routing", { group: g.name, members: ms }); loadRouting(); }
   catch (err) { $("rt-msg").textContent = err.message; }
-}`${t("ag.drifted")}``${t("ag.attached")}`
-async func`ion dis(gi, provider, no${t("ag.off")}sabled)`{
+}
+async function dis(gi, provider, nowDisabled) {
   try { await post("/_admin/routing", { provider, disabled: !nowDisabled }); loadRouting(); }
   catch (err) { $("rt-msg").textContent = err.message; }
 }
-${t("ag.preview")}
-// ---------------- Agents ----------------${t("ag.attach")}
-async function loadAgents() {${t("ag.detach")}
-  $("ag-msg").textC`ntent = "";${t(".non")}`
+
+// ---------------- Agents ----------------
+async function loadAgents() {
+  $("ag-msg").textContent = "";
   try {
     const rows = await api("/api/agents");
     $("ag-rows").innerHTML = rows.map(a => {
-      const badge = a.attachedt(ag.preview)t(ag.attach)
-        ? (a.drifted ? '<span class="badge warn">漂移</span>' : '<span class="badge ok">已接入</span>')
-        : '<span class="badge dim">未接入</span>';
-      return `<tr><td>${esc(a.agent_id)}L(</t", "doned)><td>${esc(a.adapter)}</td>
+      const badge = a.attached
+        ? (a.drifted ? `<span class="badge warn">${t("ag.drifted")}</span>` : `<span class="badge ok">${t("ag.attached")}</span>`)
+        : `<span class="badge dim">${t("ag.off")}</span>`;
+      return `<tr><td>${esc(a.agent_id)}</td><td>${esc(a.adapter)}</td>
         <td>${badge} <span class="muted">${esc(a.note || "")}</span></td>
         <td class="muted">${esc(a.config_path || "-")}</td>
-        <td><button class="act" onclick="opA('${esc(a.agent_id)}',true)">预览</button>
-        <button class="act" onclick="opA('${esc(a.agent_id)}',false)">接入</button>
-        <button class="act danger" onclick="deA('${esc(a.agent_id)}')">还原</button></td></tr>`;
-    }).join("") || '<tr><td colspan="5" class="muted">配置中无 agent</td></tr>';
+        <td><button class="act" onclick="opA('${esc(a.agent_id)}',true)">${t("ag.preview")}</button>
+        <button class="act" onclick="opA('${esc(a.agent_id)}',false)">${t("ag.attach")}</button>
+        <button class="act danger" onclick="deA('${esc(a.agent_id)}')">${t("ag.detach")}</button></td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">${t("ag.none")}</td></tr>`;
   } catch (err) { $("ag-msg").textContent = err.message; }
-} t("ag.detach") +
+}
 async function opA(id, dry) {
-  $("ag-msg").textContent = (dry ? "预览" : "接入") + " " + id + " …";
-  try {L(", "done)
+  $("ag-msg").textContent = (dry ? t("ag.preview") : t("ag.attach")) + " " + id + " …";
+  try {
     const r = await post("/api/agents/attach", { agent_id: id, dry_run: dry });
-    $("ag-msg").textContent = r.note || "完成";essage; }
+    $("ag-msg").textContent = r.note || L("完成", "done");
+    const d = (r.files || []).map(f => `--- ${f.path}\n${f.preview}`).join("\n");
+    $("ag-diff").style.display = d ? "block" : "none";
+    $("ag-diff").textContent = d || (r.env_template || "");
+    if (!dry) loadAgents();
+  } catch (err) { $("ag-msg").textContent = err.message; }
+}
+async function deA(id) {
+  $("ag-msg").textContent = t("ag.detach") + " " + id + " …";
+  try {
+    const r = await post("/api/agents/detach", { agent_id: id });
+    $("ag-msg").textContent = r.note || L("完成", "done");
+    loadAgents();
+  } catch (err) { $("ag-msg").textContent = err.message; }
 }
 
 // ---------------- Config ----------------
@@ -371,16 +371,16 @@ async function ensureCatalog() {
   return catalogCache;
 }
 
-async function populatCatalog() {
-  cont cat = await enureCatlo();
+async function populateCatalog() {
+  const cat = await ensureCatalog();
   const vs = $("qa-vendor"), ps = $("qa-plan");
-  const keepV = vs.value, keepP = ps.valu
+  const keepV = vs.value, keepP = ps.value;
   vs.innerHTML = `<option value="">${t("qa.pickv")}</option>` + cat.map(v =>
-    `<option value="${esc(v.id)}">${esc(lang === "zh" ? v.name_zh :v.name_en)</option>`).join("");
+    `<option value="${esc(v.id)}">${esc(lang === "zh" ? v.name_zh : v.name_en)}</option>`).join("");
   if (keepV && cat.some(v => v.id === keepV)) vs.value = keepV;
   const vendor = cat.find(v => v.id === vs.value);
   ps.innerHTML = vendor ? vendor.plans.map(p =>
-    `<option value="${esc(p.id)}">${esc(lang === "zh" ? p.label_zh : p.label_en) </option>`).join("")   const d = (r.files || []).map(f => `--- ${f.path}\n${f.preview}`).join("\n");
+    `<option value="${esc(p.id)}">${esc(lang === "zh" ? p.label_zh : p.label_en)}</option>`).join("")
     : `<option value="">${t("qa.pickp")}</option>`;
   if (vendor && vendor.plans.some(p => p.id === keepP)) ps.value = keepP;
 }
@@ -435,55 +435,7 @@ async function copyConfig() {
   catch { $("cfg-msg").textContent = L("复制失败，请手动全选复制", "Copy failed, select all manually"); }
 }
 
-applyLang();    $("ag-diff").style.display = d ? "block" : "none";
-    $("ag-diff").textContent = d || (r.env_template || "");
-    if (!dry) loadAgents();
-  } catch (err) { $("ag-msg").textContent = err.message; }
-}
-async function deA(id) {
-  $("ag-msg").textContent = "还原 " + id + " …";
-  try {
-    const r = await post("/api/agents/detach", { agent_id: id });
-    $("ag-msg").textContent = r.note || "完成";
-    loadAgents();
-  } catch (err) { $("ag-msg").textContent = err.message; }
-}
-
-// ---------------- Config ----------------
-let cfgPath = "";
-async function loadConfig() {
-  $("cfg-msg").textContent = "读取中 …";
-  try {
-    const j = await api("/api/config");
-    cfgPath = j.path;
-    $("cfg-text").value = j.text;
-    $("cfg-msg").textContent = "当前配置：" + j.path;
-  } catch (err) { $("cfg-msg").textContent = err.message; }
-}
-async function saveConfig() {
-  const text = $("cfg-text").value;
-  if (!text.trim()) { $("cfg-msg").textContent = "配置为空，已忽略"; return; }
-  $("cfg-msg").textContent = "校验并应用中 …";
-  try {
-    const r = await post("/_admin/config", { text });
-    $("cfg-msg").textContent = "已保存并热重载生效" + (r.addr_changed ? "（注意：监听地址变更需重启进程）" : "") + (r.warnings && r.warnings.length ? "；警告：" + r.warnings.join("；") : "");
-  } catch (err) { $("cfg-msg").textContent = "失败：" + err.message; }
-}
-function exportConfig() {
-  const text = $("cfg-text").value;
-  if (!text.trim()) { $("cfg-msg").textContent = "先读取或粘贴配置再导出"; return; }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type: "application/x-yaml" }));
-  a.download = "agentbuffet-config.yaml";
-  a.click();
-  URL.revokeObjectURL(a.href);
-  $("cfg-msg").textContent = "已导出 agentbuffet-config.yaml";
-}
-async function copyConfig() {
-  try { await navigator.clipboard.writeText($("cfg-text").value); $("cfg-msg").textContent = "已复制到剪贴板"; }
-  catch { $("cfg-msg").textContent = "复制失败，请手动全选复制"; }
-}
-
+applyLang();
 loadOverview();
 </script>
 </body>
