@@ -191,7 +191,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
 
       <section id="v-overview" class="view on">
         <div class="toolbar">
-          <button class="btn ghost sm" onclick="loadOverview()" data-i18n="common.refresh"></button>
+          <button class="btn ghost sm" onclick="doRefresh(this,'loadOverview')" data-i18n="common.refresh"></button>
           <span class="muted" id="ov-date"></span>
         </div>
         <div class="cards">
@@ -215,7 +215,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
       <section id="v-providers" class="view">
         <div class="toolbar">
           <button class="btn primary" onclick="openAddWizard()">＋ <span data-i18n="pv.add"></span></button>
-          <button class="btn ghost sm" onclick="loadProviders()" data-i18n="common.refresh"></button>
+          <button class="btn ghost sm" onclick="doRefresh(this,'loadProviders')" data-i18n="common.refresh"></button>
           <span class="muted" data-i18n="pv.hint"></span>
         </div>
         <div class="pgrid" id="pv-grid"></div>
@@ -224,7 +224,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
       <section id="v-routing" class="view">
         <div class="toolbar">
           <button class="btn primary" onclick="openGroup()">＋ <span data-i18n="rt.add"></span></button>
-          <button class="btn ghost sm" onclick="loadRouting()" data-i18n="common.refresh"></button>
+          <button class="btn ghost sm" onclick="doRefresh(this,'loadRouting')" data-i18n="common.refresh"></button>
           <span class="muted" data-i18n="rt.hint"></span>
         </div>
         <div id="rt-grid"></div>
@@ -233,7 +233,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
       <section id="v-agents" class="view">
         <div class="toolbar">
           <button class="btn primary" onclick="openAgent()">＋ <span data-i18n="ag.add"></span></button>
-          <button class="btn ghost sm" onclick="loadAgents()" data-i18n="common.refresh"></button>
+          <button class="btn ghost sm" onclick="doRefresh(this,'loadAgents')" data-i18n="common.refresh"></button>
           <span class="muted" data-i18n="ag.hint"></span>
         </div>
         <div class="panel" id="ag-detect" style="display:none">
@@ -244,7 +244,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
         <div class="panel" style="padding:4px 10px;overflow-x:auto">
           <table><thead><tr>
             <th>Agent</th><th data-i18n="ag.adapter"></th><th data-i18n="col.status"></th>
-            <th data-i18n="ag.defgroup"></th><th data-i18n="col.ops"></th>
+            <th data-i18n="ag.defgroup"></th><th data-i18n="ag.models"></th><th data-i18n="col.ops"></th>
           </tr></thead><tbody id="ag-rows"></tbody></table>
         </div>
       </section>
@@ -329,6 +329,7 @@ const I18N = {
     "nav.overview": "概览", "nav.providers": "服务商", "nav.routing": "路由",
     "nav.agents": "接入器", "nav.settings": "设置",
     "common.refresh": "刷新", "common.cancel": "取消", "common.confirm": "确定",
+    "common.refreshing": "刷新中", "common.refreshed": "已刷新",
     "col.time": "时间", "col.group": "组", "col.provider": "服务商", "col.status": "状态",
     "col.tokens": "Tokens", "col.cost": "费用", "col.dur": "耗时", "col.chain": "失败链", "col.ops": "操作",
     "ov.req": "今日请求", "ov.pt": "输入 Tokens", "ov.ct": "输出 Tokens", "ov.cost": "费用估算",
@@ -336,7 +337,7 @@ const I18N = {
     "pv.add": "添加服务商", "pv.hint": "API Key 仅存于本机 env 文件（0600），绝不写入配置",
     "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
     "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
-    "ag.adapter": "适配器", "ag.defgroup": "默认组",
+    "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.models": "使用模型",
     "ag.detect": "本机 Agent 检测", "ag.detectHint": "自动识别本机已安装的编程 Agent，一键接入网关",
     "st.gateway": "网关", "st.gatewayHint": "监听地址修改后需重启进程才会生效",
     "st.addr": "网关监听地址（API）", "st.uiAddr": "控制台监听地址（UI）",
@@ -357,6 +358,7 @@ const I18N = {
     "nav.overview": "Overview", "nav.providers": "Providers", "nav.routing": "Routing",
     "nav.agents": "Agents", "nav.settings": "Settings",
     "common.refresh": "Refresh", "common.cancel": "Cancel", "common.confirm": "OK",
+    "common.refreshing": "Refreshing", "common.refreshed": "Refreshed",
     "col.time": "Time", "col.group": "Group", "col.provider": "Provider", "col.status": "Status",
     "col.tokens": "Tokens", "col.cost": "Cost", "col.dur": "Duration", "col.chain": "Fail chain", "col.ops": "Actions",
     "ov.req": "Requests today", "ov.pt": "Prompt tokens", "ov.ct": "Completion tokens", "ov.cost": "Est. cost",
@@ -364,7 +366,7 @@ const I18N = {
     "pv.add": "Add provider", "pv.hint": "API keys live only in the local env file (0600), never in config",
     "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
     "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
-    "ag.adapter": "Adapter", "ag.defgroup": "Default group",
+    "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.models": "Models",
     "ag.detect": "Detected local agents", "ag.detectHint": "Coding tools found on this machine, attach in one click",
     "st.gateway": "Gateway", "st.gatewayHint": "Changing listen addresses requires a process restart",
     "st.addr": "Gateway listen address (API)", "st.uiAddr": "Console listen address (UI)",
@@ -412,6 +414,18 @@ async function api(path, opts) {
 const post = (path, body) => api(path, {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
 });
+async function doRefresh(btn, name) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "\u21bb " + L("刷新中", "Refreshing");
+  try {
+    const ok = await window[name]();
+    if (ok !== false) toast(L("已刷新", "Refreshed"), "ok");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
 
 // ---------------- toast / modal ----------------
 function toast(msg, type = "info") {
@@ -491,7 +505,8 @@ async function loadOverview() {
       <td class="muted">${esc((e.fail_chain || []).join(" → "))}</td>
     </tr>`).join("")
       || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
-  } catch (err) { toast(err.message, "bad"); }
+    return true;
+  } catch (err) { toast(err.message, "bad"); return false; }
 }
 </script>
 <script>
@@ -533,7 +548,8 @@ async function loadProviders() {
           <button class="btn sm danger" onclick="delProvider('${esc(p.id)}')">${esc(L("删除", "Delete"))}</button>
         </div></div>`;
     }).join("") || `<div class="empty" style="grid-column:1/-1"><div class="big">🛒</div><b>${esc(L("还没有服务商", "No providers yet"))}</b>${esc(L("点右上角「添加服务商」，选厂商 → 选套餐 → 贴 Key，三步完成", "Click “Add provider”: pick vendor → pick plan → paste key. Three steps."))}</div>`;
-  } catch (err) { toast(err.message, "bad"); }
+    return true;
+  } catch (err) { toast(err.message, "bad"); return false; }
 }
 
 async function catalog() {
@@ -718,7 +734,8 @@ async function loadRouting() {
       </div>`).join("")
       || `<div class="empty"><div class="big">🧭</div><b>${esc(L("还没有路由组", "No routing groups yet"))}</b>${esc(L("路由组 = 一组「服务商 + 模型」的优先级列表，故障时自动转移", "A group is a prioritized list of provider/model pairs with automatic failover"))}</div>`;
     document.querySelectorAll("#rt-grid [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
-  } catch (err) { toast(err.message, "bad"); }
+    return true;
+  } catch (err) { toast(err.message, "bad"); return false; }
 }
 
 let gm = [];
@@ -821,7 +838,15 @@ async function loadAgents() {
   try {
     state.agents = await api("/api/agents");
     loadDetect();
-    if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
+    state.groups = (await api("/api/routing")).groups || [];
+    const modelsCell = (a) => {
+      const g = state.groups.find(x => x.name === a.default_group);
+      if (!g || !g.members.length) return `<span class="muted">-</span>`;
+      const ms = g.members.filter(m => !m.disabled);
+      if (!ms.length) return `<span class="muted">${esc(L("成员已全部停用", "all members disabled"))}</span>`;
+      return `<div style="display:flex;flex-wrap:wrap;gap:4px">` + ms.map(m =>
+        `<span class="chip" title="${esc(m.provider)}">${esc(m.provider)}/${esc(m.model)}</span>`).join("") + `</div>`;
+    };
     const rows = state.agents;
     $("ag-rows").innerHTML = rows.map(a => {
       const stp = a.attached ? (a.drifted ? "warn" : "on") : "dim";
@@ -831,6 +856,7 @@ async function loadAgents() {
         <td><span class="chip">${esc(a.adapter)}</span></td>
         <td><span class="pill ${stp}"><i></i>${esc(stx)}</span>${a.note ? `<div class="muted">${esc(a.note)}</div>` : ""}</td>
         <td><code>${esc(a.default_group || "-")}</code></td>
+        <td>${modelsCell(a)}</td>
         <td style="white-space:nowrap">
           ${a.attached ? `<button class="btn sm ghost" onclick="doDetach('${esc(a.agent_id)}')">${esc(L("还原", "Restore"))}</button>`
             : `<button class="btn sm primary" onclick="openAttach('${esc(a.agent_id)}')">${esc(L("接入", "Attach"))}</button>`}
@@ -838,8 +864,9 @@ async function loadAgents() {
           <button class="btn sm danger" onclick="delAgent('${esc(a.agent_id)}')">${esc(L("删除", "Delete"))}</button>
         </td></tr>`;
     }).join("")
-      || `<tr><td colspan="5"><div class="empty"><div class="big">🤖</div><b>${esc(L("还没有 Agent", "No agents yet"))}</b>${esc(L("Agent 是接入网关的编程助手（opencode / codex / hermes …），新增后一键改写其本地配置", "An agent is a coding tool routed through the gateway. Add one, then attach it in a click"))}</div></td></tr>`;
-  } catch (err) { toast(err.message, "bad"); }
+      || `<tr><td colspan="6"><div class="empty"><div class="big">🤖</div><b>${esc(L("还没有 Agent", "No agents yet"))}</b>${esc(L("Agent 是接入网关的编程助手（opencode / codex / hermes …），新增后一键改写其本地配置", "An agent is a coding tool routed through the gateway. Add one, then attach it in a click"))}</div></td></tr>`;
+    return true;
+  } catch (err) { toast(err.message, "bad"); return false; }
 }
 async function loadDetect() {
   try {
