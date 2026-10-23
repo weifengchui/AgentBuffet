@@ -99,7 +99,7 @@ impl Usage {
         let _ = std::fs::create_dir_all(&logs_dir);
         let (prices, warn) = load_prices(prices_path);
         if let Some(w) = warn {
-            eprintln!("buffetd: [warn] {w}");
+            eprintln!("AgentBuffet: [warn] {w}");
         }
         let u = Self {
             logs_dir,

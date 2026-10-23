@@ -670,7 +670,7 @@ fn cx_render(
     let ours = text.contains(CX_TABLE_BEGIN);
     if has_table && !ours {
         return Err(format!(
-            "[model_providers.{PROVIDER_NAME}] 已存在但非 buffetd 注入（缺少标记），拒绝写入；请手动删除后重试"
+            "[model_providers.{PROVIDER_NAME}] 已存在但非 AgentBuffet 注入（缺少标记），拒绝写入；请手动删除后重试"
         ));
     }
     let mut note = String::new();

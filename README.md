@@ -1,6 +1,6 @@
 # AgentBuffet
 
-极低功耗的本地 AI 模型 API 网关：一个 `buffetd` 二进制，把多家模型供应商聚合成统一入口，为每个 Agent 提供按优先级自动故障转移的"自助餐台"。空闲 CPU < 0.5%、常驻内存 < 30MB。
+极低功耗的本地 AI 模型 API 网关：一个 `AgentBuffet` 二进制，把多家模型供应商聚合成统一入口，为每个 Agent 提供按优先级自动故障转移的"自助餐台"。空闲 CPU < 0.5%、常驻内存 < 30MB。
 
 ## 特性
 
@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](../../releases) 下载对应平台的压缩包，解压得到 `buffetd`。
+1. 从 [Releases](../../releases) 下载对应平台的压缩包，解压得到 `AgentBuffet`。
 
 2. 写配置 `~/.agentbuffet/config.yaml`：
 
@@ -61,7 +61,7 @@ failover:
 ```bash
 export DEEPSEEK_API_KEY=sk-...
 export MOONSHOT_API_KEY=sk-...
-buffetd serve
+AgentBuffet serve
 ```
 
 4. 打开 `http://127.0.0.1:3426/` 查看 UI，对检测到的 Agent 拨一下开关即完成接入。
@@ -69,11 +69,11 @@ buffetd serve
 ## 接入 Agent
 
 ```bash
-buffetd agents detect          # 扫描已安装的 Agent 与接入状态
-buffetd agents attach opencode # 注入配置（自动备份，幂等）
-buffetd agents attach codex --dry-run
-buffetd agents detach opencode # 还原（备份优先，逐字节）
-buffetd agents status          # 漂移检查
+AgentBuffet agents detect          # 扫描已安装的 Agent 与接入状态
+AgentBuffet agents attach opencode # 注入配置（自动备份，幂等）
+AgentBuffet agents attach codex --dry-run
+AgentBuffet agents detach opencode # 还原（备份优先，逐字节）
+AgentBuffet agents status          # 漂移检查
 ```
 
 未收录的 Agent（任意 OpenAI-compatible 客户端）用通用适配器：`attach` 会打印环境变量模板，设 `OPENAI_BASE_URL=http://127.0.0.1:3425/<agent-id>/v1`、`OPENAI_API_KEY=agentbuffet` 即可。
@@ -82,10 +82,10 @@ buffetd agents status          # 漂移检查
 
 | 命令 | 说明 |
 | --- | --- |
-| `buffetd [serve]` | 启动网关（默认子命令） |
-| `buffetd reload` | 通知运行中的网关热重载配置（校验失败拒载，旧快照继续服务） |
-| `buffetd agents detect\|status\|attach\|detach` | 接入器 |
-| `buffetd service install\|uninstall` | 写/删 systemd 用户级自启单元（Linux） |
+| `AgentBuffet [serve]` | 启动网关（默认子命令） |
+| `AgentBuffet reload` | 通知运行中的网关热重载配置（校验失败拒载，旧快照继续服务） |
+| `AgentBuffet agents detect\|status\|attach\|detach` | 接入器 |
+| `AgentBuffet service install\|uninstall` | 写/删 systemd 用户级自启单元（Linux） |
 
 环境变量：`AGENTBUFFET_CONFIG` 覆盖配置文件路径，`AGENTBUFFET_HOME` 覆盖数据目录（用量日志、Key 环境文件）。
 
@@ -100,7 +100,7 @@ buffetd agents status          # 漂移检查
 ## 构建
 
 ```bash
-cargo build --release          # 产物 target/release/buffetd
+cargo build --release          # 产物 target/release/AgentBuffet
 cargo test                     # 单元 + 集成（含 mock provider，无外网依赖）
 ```
 

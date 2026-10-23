@@ -1,4 +1,4 @@
-//! buffetd：单二进制入口。配置校验失败拒绝启动（报错带文件名）。
+//! AgentBuffet：单二进制入口。配置校验失败拒绝启动（报错带文件名）。
 //! M3：gateway + ui_addr(_admin) 双监听，用量记账落 ~/.agentbuffet/logs。
 //! M4：CLI 子命令（reload / agents / service）+ systemd 用户级自启单元（只写文件，不 spawn 进程）。
 
@@ -31,7 +31,7 @@ fn load_snapshot() -> agentbuffet::config::Snapshot {
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("buffetd: 读取配置失败 {}: {e}", path.display());
+            eprintln!("AgentBuffet: 读取配置失败 {}: {e}", path.display());
             std::process::exit(1);
         }
     };
@@ -39,7 +39,7 @@ fn load_snapshot() -> agentbuffet::config::Snapshot {
     match agentbuffet::config::load_str(&text, &filename) {
         Ok(s) => s,
         Err(errs) => {
-            eprintln!("buffetd: 配置校验失败：");
+            eprintln!("AgentBuffet: 配置校验失败：");
             for e in errs {
                 eprintln!("  - {e}");
             }
@@ -50,14 +50,14 @@ fn load_snapshot() -> agentbuffet::config::Snapshot {
 
 fn usage(code: i32) -> ! {
     eprintln!(
-        "用法: buffetd [serve]                     启动网关（默认）\n\
-        \x20     buffetd reload                     通知运行中的网关热重载配置\n\
-        \x20     buffetd agents detect|status       列出全部 agent 接入状态\n\
-        \x20     buffetd agents attach <id> [--group g] [--dry-run]\n\
-        \x20     buffetd agents detach <id>         还原（备份优先，逐字节）\n\
-        \x20     buffetd service install|uninstall|status  开机自启（systemd 用户单元 / Windows 启动目录）\n\
-        \x20     buffetd config export [--out PATH]   导出当前配置（默认 stdout）\n\
-        \x20     buffetd config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）"
+        "用法: AgentBuffet [serve]                     启动网关（默认）\n\
+        \x20     AgentBuffet reload                     通知运行中的网关热重载配置\n\
+        \x20     AgentBuffet agents detect|status       列出全部 agent 接入状态\n\
+        \x20     AgentBuffet agents attach <id> [--group g] [--dry-run]\n\
+        \x20     AgentBuffet agents detach <id>         还原（备份优先，逐字节）\n\
+        \x20     AgentBuffet service install|uninstall|status  开机自启（systemd 用户单元 / Windows 启动目录）\n\
+        \x20     AgentBuffet config export [--out PATH]   导出当前配置（默认 stdout）\n\
+        \x20     AgentBuffet config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）"
     );
     std::process::exit(code);
 }
@@ -74,7 +74,7 @@ async fn main() {
         "config" => config_cmd(&args[1..]),
         "help" | "-h" | "--help" => usage(0),
         other => {
-            eprintln!("buffetd: 未知命令: {other}");
+            eprintln!("AgentBuffet: 未知命令: {other}");
             usage(2);
         }
     }
@@ -85,7 +85,7 @@ async fn serve() {
 
     if std::io::stderr().is_terminal() {
         for w in agentbuffet::config::startup_warnings(&snap) {
-            eprintln!("buffetd: [warn] {w}");
+            eprintln!("AgentBuffet: [warn] {w}");
         }
     }
 
@@ -95,7 +95,7 @@ async fn serve() {
     let loaded = agentbuffet::load_env_file(&state.env_file);
     if loaded > 0 {
         eprintln!(
-            "buffetd: 已从 {} 载入 {loaded} 个环境变量",
+            "AgentBuffet: 已从 {} 载入 {loaded} 个环境变量",
             state.env_file.display()
         );
     }
@@ -105,19 +105,19 @@ async fn serve() {
     let listener = match tokio::net::TcpListener::bind(listen).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("buffetd: 监听 {listen} 失败: {e}");
+            eprintln!("AgentBuffet: 监听 {listen} 失败: {e}");
             std::process::exit(1);
         }
     };
     let ui_listener = match tokio::net::TcpListener::bind(ui).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("buffetd: 监听 {ui}（_admin）失败: {e}");
+            eprintln!("AgentBuffet: 监听 {ui}（_admin）失败: {e}");
             std::process::exit(1);
         }
     };
     println!(
-        "buffetd 已启动: gateway http://{listen}  admin http://{ui} (UI + POST /_admin/reload)"
+        "AgentBuffet 已启动: gateway http://{listen}  admin http://{ui} (UI + POST /_admin/reload)"
     );
 
     // ctrl_c 一次触发，两个监听各自优雅退出
@@ -147,7 +147,7 @@ async fn serve() {
     };
 
     if let Err(e) = tokio::try_join!(gw, adm) {
-        eprintln!("buffetd: 服务异常退出: {e}");
+        eprintln!("AgentBuffet: 服务异常退出: {e}");
         std::process::exit(1);
     }
 }
@@ -158,7 +158,7 @@ async fn reload_cmd() {
     let r = reqwest::Client::new().post(&url).send().await;
     match r {
         Err(e) => {
-            eprintln!("buffetd: 调用 {url} 失败: {e}");
+            eprintln!("AgentBuffet: 调用 {url} 失败: {e}");
             std::process::exit(1);
         }
         Ok(resp) => {
@@ -227,7 +227,7 @@ fn agents_cmd(args: &[String]) {
                         i += 1;
                     }
                     other => {
-                        eprintln!("buffetd: 未知参数: {other}");
+                        eprintln!("AgentBuffet: 未知参数: {other}");
                         usage(2);
                     }
                 }
@@ -277,7 +277,7 @@ fn agents_cmd(args: &[String]) {
             }
         }
         _ => {
-            eprintln!("buffetd: 未知 agents 子命令: {sub}");
+            eprintln!("AgentBuffet: 未知 agents 子命令: {sub}");
             usage(2);
         }
     }
@@ -296,7 +296,7 @@ fn config_cmd(args: &[String]) {
                         i += 1;
                     }
                     other => {
-                        eprintln!("buffetd: 未知参数: {:?}", other.0);
+                        eprintln!("AgentBuffet: 未知参数: {:?}", other.0);
                         std::process::exit(2);
                     }
                 }
@@ -306,14 +306,14 @@ fn config_cmd(args: &[String]) {
             let text = match std::fs::read_to_string(&path) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("buffetd: 读取 {} 失败: {e}", path.display());
+                    eprintln!("AgentBuffet: 读取 {} 失败: {e}", path.display());
                     std::process::exit(1);
                 }
             };
             match out {
                 Some(o) => {
                     if let Err(e) = std::fs::write(&o, &text) {
-                        eprintln!("buffetd: 写入 {} 失败: {e}", o.display());
+                        eprintln!("AgentBuffet: 写入 {} 失败: {e}", o.display());
                         std::process::exit(1);
                     }
                     eprintln!("已导出 {} → {}", path.display(), o.display());
@@ -323,26 +323,26 @@ fn config_cmd(args: &[String]) {
         }
         "import" => {
             let Some(src) = args.get(1) else {
-                eprintln!("buffetd: 用法: buffetd config import PATH");
+                eprintln!("AgentBuffet: 用法: AgentBuffet config import PATH");
                 std::process::exit(2);
             };
             let text = match std::fs::read_to_string(src) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("buffetd: 读取 {src} 失败: {e}");
+                    eprintln!("AgentBuffet: 读取 {src} 失败: {e}");
                     std::process::exit(1);
                 }
             };
             let dst = default_config_path();
             if let Err(errs) = agentbuffet::config::load_str(&text, src) {
-                eprintln!("buffetd: 配置校验失败，未写入: {errs:?}");
+                eprintln!("AgentBuffet: 配置校验失败，未写入: {errs:?}");
                 std::process::exit(1);
             }
             if dst.exists() {
                 let bak = PathBuf::from(format!("{}.bak", dst.display()));
                 if !bak.exists() {
                     if let Err(e) = std::fs::copy(&dst, &bak) {
-                        eprintln!("buffetd: 备份 {} 失败: {e}", bak.display());
+                        eprintln!("AgentBuffet: 备份 {} 失败: {e}", bak.display());
                         std::process::exit(1);
                     }
                 }
@@ -351,14 +351,14 @@ fn config_cmd(args: &[String]) {
                 let _ = std::fs::create_dir_all(dir);
             }
             if let Err(e) = std::fs::write(&dst, &text) {
-                eprintln!("buffetd: 写入 {} 失败: {e}", dst.display());
+                eprintln!("AgentBuffet: 写入 {} 失败: {e}", dst.display());
                 std::process::exit(1);
             }
             println!("已导入配置 → {}", dst.display());
-            println!("运行中的网关执行 buffetd reload 即可热重载生效。");
+            println!("运行中的网关执行 AgentBuffet reload 即可热重载生效。");
         }
         other => {
-            eprintln!("buffetd: 用法: buffetd config export [--out PATH] | buffetd config import PATH（未知: {other}）");
+            eprintln!("AgentBuffet: 用法: AgentBuffet config export [--out PATH] | AgentBuffet config import PATH（未知: {other}）");
             std::process::exit(2);
         }
     }
@@ -398,7 +398,7 @@ fn service_cmd(args: &[String]) {
             }
         }
         other => {
-            eprintln!("buffetd: 未知 service 子命令: {other}");
+            eprintln!("AgentBuffet: 未知 service 子命令: {other}");
             usage(2);
         }
     }

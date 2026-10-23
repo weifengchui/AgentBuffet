@@ -1,6 +1,6 @@
 //! 开机自启：Linux/WSL 写 systemd 用户级单元并以 wants 符号链接启用（等价
 //! `systemctl --user enable`，纯文件系统操作、零外部进程）；Windows 写开始菜单
-//! 启动目录 .bat。启用后下次登录（开机）自动拉起 `buffetd serve`。
+//! 启动目录 .bat。启用后下次登录（开机）自动拉起 `AgentBuffet serve`。
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -34,7 +34,7 @@ mod imp {
     fn unit_text() -> String {
         let exe = std::env::current_exe()
             .map(|x| x.display().to_string())
-            .unwrap_or_else(|_| "buffetd".into());
+            .unwrap_or_else(|_| "AgentBuffet".into());
         format!(
             "[Unit]\nDescription=AgentBuffet AI gateway\nAfter=network-online.target\n\n\
              [Service]\nExecStart={exe} serve\nRestart=on-failure\nRestartSec=2\n\
@@ -119,7 +119,7 @@ mod imp {
         std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
         let exe = std::env::current_exe()
             .map(|x| x.display().to_string())
-            .unwrap_or_else(|_| "buffetd.exe".into());
+            .unwrap_or_else(|_| "AgentBuffet.exe".into());
         std::fs::write(bat_path(home), format!("@echo off\r\n\"{exe}\" serve\r\n"))
             .map_err(|e| format!("写入启动脚本失败: {e}"))?;
         Ok(status(home))

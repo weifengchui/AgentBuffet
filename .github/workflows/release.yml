@@ -23,19 +23,19 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: buffetd-linux-x86_64
+            artifact: agentbuffet-linux-x86_64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            artifact: buffetd-linux-aarch64
+            artifact: agentbuffet-linux-aarch64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: buffetd-macos-x86_64
+            artifact: agentbuffet-macos-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: buffetd-macos-aarch64
+            artifact: agentbuffet-macos-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: buffetd-windows-x86_64
+            artifact: agentbuffet-windows-x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -56,12 +56,12 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.artifact }}.tar.gz buffetd
+          tar czf ../../../${{ matrix.artifact }}.tar.gz AgentBuffet
 
       - name: 打包 zip（Windows）
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: Compress-Archive -Path "target/${{ matrix.target }}/release/buffetd.exe" -DestinationPath "${{ matrix.artifact }}.zip"
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/AgentBuffet.exe" -DestinationPath "${{ matrix.artifact }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:

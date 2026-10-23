@@ -15,7 +15,7 @@ mkdir -p "$DIST"
 echo "==> Linux ($LINUX_T)"
 cargo build --release --target "$LINUX_T"
 mkdir -p "$DIST/agentbuffet-linux-x86_64"
-cp "$CARGO_TARGET_DIR/$LINUX_T/release/buffetd" "$DIST/agentbuffet-linux-x86_64/"
+cp "$CARGO_TARGET_DIR/$LINUX_T/release/AgentBuffet" "$DIST/agentbuffet-linux-x86_64/"
 cp README.md "$DIST/agentbuffet-linux-x86_64/" 2>/dev/null || true
 tar czf "$DIST/agentbuffet-linux-x86_64.tar.gz" -C "$DIST" agentbuffet-linux-x86_64
 
@@ -24,7 +24,7 @@ if command -v zig >/dev/null 2>&1 || [ -x /tmp/opencode/zig14/zig ]; then
   ZIGBIN="$(command -v zig || echo /tmp/opencode/zig14/zig)"
   PATH="$(dirname "$ZIGBIN"):$PATH" cargo zigbuild --release --target "$WIN_T"
   mkdir -p "$DIST/agentbuffet-windows-x86_64"
-  cp "$CARGO_TARGET_DIR/$WIN_T/release/buffetd.exe" "$DIST/agentbuffet-windows-x86_64/"
+  cp "$CARGO_TARGET_DIR/$WIN_T/release/AgentBuffet.exe" "$DIST/agentbuffet-windows-x86_64/"
   cp README.md "$DIST/agentbuffet-windows-x86_64/" 2>/dev/null || true
   (cd "$DIST" && python3 -m zipfile -c agentbuffet-windows-x86_64.zip agentbuffet-windows-x86_64)
 else
