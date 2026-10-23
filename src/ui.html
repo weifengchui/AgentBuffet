@@ -52,6 +52,7 @@ pre { background: #0c1015; border: 1px solid var(--line); border-radius: 6px;
 select, input[type=password], input[type=text] { background: var(--panel); color: var(--text);
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
 input#qa-key { width: 280px; }
+select:disabled { opacity: .45; }
 </style>
 </head>
 <body>
@@ -110,7 +111,7 @@ input#qa-key { width: 280px; }
     <div class="group">
       <h3 data-i18n="qa.title"></h3>
       <div class="toolbar">
-        <select id="qa-vendor"></select>
+        <select id="qa-vendor" onchange="populatePlans()"></select>
         <select id="qa-plan"></select>
         <input id="qa-key" type="password" autocomplete="off" data-i18n-ph="qa.keyph">
         <button class="act" onclick="addProvider()" data-i18n="qa.add"></button>
@@ -373,28 +374,42 @@ async function ensureCatalog() {
 
 async function populateCatalog() {
   const cat = await ensureCatalog();
-  const vs = $("qa-vendor"), ps = $("qa-plan");
-  const keepV = vs.value, keepP = ps.value;
+  const vs = $("qa-vendor");
+  const keepV = vs.value;
   vs.innerHTML = `<option value="">${t("qa.pickv")}</option>` + cat.map(v =>
     `<option value="${esc(v.id)}">${esc(lang === "zh" ? v.name_zh : v.name_en)}</option>`).join("");
   if (keepV && cat.some(v => v.id === keepV)) vs.value = keepV;
+  await populatePlans();
+}
+async function populatePlans() {
+  const cat = await ensureCatalog();
+  const vs = $("qa-vendor"), ps = $("qa-plan");
+  const keepP = ps.value;
   const vendor = cat.find(v => v.id === vs.value);
-  ps.innerHTML = vendor ? vendor.plans.map(p =>
-    `<option value="${esc(p.id)}">${esc(lang === "zh" ? p.label_zh : p.label_en)}</option>`).join("")
-    : `<option value="">${t("qa.pickp")}</option>`;
-  if (vendor && vendor.plans.some(p => p.id === keepP)) ps.value = keepP;
+  if (!vendor) { ps.innerHTML = `<option value="">${t("qa.pickp")}</option>`; ps.disabled = true; return; }
+  ps.disabled = false;
+  if (vendor.plans.length === 1) {
+    const p = vendor.plans[0];
+    ps.innerHTML = `<option value="${esc(p.id)}" selected>${esc(lang === "zh" ? p.label_zh : p.label_en)}</option>`;
+  } else {
+    ps.innerHTML = `<option value="">${t("qa.pickp")}</option>` + vendor.plans.map(p =>
+      `<option value="${esc(p.id)}">${esc(lang === "zh" ? p.label_zh : p.label_en)}</option>`).join("");
+    if (vendor.plans.some(p => p.id === keepP)) ps.value = keepP;
+  }
 }
 
 async function addProvider() {
   const vendor = $("qa-vendor").value, plan = $("qa-plan").value;
   const key = $("qa-key").value.trim();
   if (!vendor) { $("qa-msg").textContent = L("请选择厂商", "Pick a vendor first"); return; }
+  if (!plan) { $("qa-msg").textContent = L("请选择套餐", "Pick a plan"); return; }
   if (!key) { $("qa-msg").textContent = L("请输入 API Key", "Paste an API key first"); return; }
   $("qa-msg").textContent = L("添加中 …", "Adding …");
   try {
     const r = await post("/_admin/provider", { vendor, plan, api_key: key });
-    $("qa-msg").textContent = L(`已添加 provider ${r.provider}，Key 已写入 env（${r.api_key_env}）并热重载生效`,
-      `Provider ${r.provider} added; key saved to env (${r.api_key_env}) and hot-reloaded`);
+    $("qa-msg").textContent = L(`已添加 provider ${r.provider}（${r.models ?? 0} 个模型），Key 已写入 env（${r.api_key_env}）并热重载生效`,
+      `Provider ${r.provider} added (${r.models ?? 0} models); key saved to env (${r.api_key_env}) and hot-reloaded`)
+      + (r.warnings && r.warnings.length ? L("；", "; ") + r.warnings.join("；") : "");
     $("qa-key").value = "";
     loadConfig();
   } catch (err) { $("qa-msg").textContent = L("失败：", "Failed: ") + err.message; }

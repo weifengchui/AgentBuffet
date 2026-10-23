@@ -165,8 +165,13 @@ pub fn provider_id(vendor_id: &str, plan_id: &str) -> String {
 /// 查找 (vendor, plan) → (provider_id, plan)。
 pub fn lookup(vendor_id: &str, plan_id: &str) -> Option<(String, Plan)> {
     let vendor = catalog().into_iter().find(|x| x.id == vendor_id)?;
-    let plan = vendor.plans.into_iter().find(|x| x.id == plan_id)?;
-    Some((provider_id(vendor_id, plan_id), plan))
+    // 单套餐厂商允许省略 plan_id（UI 自动选中，手工调用也可留空）。
+    let plan = if plan_id.is_empty() && vendor.plans.len() == 1 {
+        vendor.plans.into_iter().next()?
+    } else {
+        vendor.plans.into_iter().find(|x| x.id == plan_id)?
+    };
+    Some((provider_id(vendor_id, &plan.id), plan))
 }
 
 /// provider id → 环境变量名：大写，非字母数字转 `_`。
@@ -205,5 +210,9 @@ mod tests {
         assert_eq!(plan.base_url, "https://opencode.ai/zen/go/v1");
         assert!(lookup("nope", "api").is_none());
         assert!(lookup("deepseek", "nope").is_none());
+        // 单套餐厂商：空 plan 自动命中唯一套餐
+        let (id, _) = lookup("openrouter", "").expect("sole plan");
+        assert_eq!(id, "openrouter");
+        assert!(lookup("opencode", "").is_none());
     }
 }

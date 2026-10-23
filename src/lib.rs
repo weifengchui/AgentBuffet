@@ -708,6 +708,39 @@ async fn provider_add(
         );
     };
     let env_name = vendors::env_name(&pid);
+    // 目录未给默认模型（如 OpenRouter）：先用 Key 试拉 /models，失败不阻断添加。
+    let mut models = plan.models.clone();
+    let mut extra_warnings: Vec<String> = Vec::new();
+    if models.is_empty() {
+        let url = format!("{}/models", plan.base_url.trim_end_matches('/'));
+        let sent = tokio::time::timeout(
+            Duration::from_secs(5),
+            st.client.get(&url).bearer_auth(body.api_key.trim()).send(),
+        )
+        .await;
+        match sent {
+            Ok(Ok(resp)) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(j) => {
+                        if let Some(arr) = j.get("data").and_then(|d| d.as_array()) {
+                            models = arr
+                                .iter()
+                                .filter_map(|m| {
+                                    m.get("id").and_then(|i| i.as_str()).map(String::from)
+                                })
+                                .take(100)
+                                .collect();
+                        }
+                    }
+                    Err(_) => extra_warnings
+                        .push("模型列表解析失败：可稍后在配置 YAML 中手工补充 models".into()),
+                }
+            }
+            _ => {
+                extra_warnings.push("模型列表拉取失败：可稍后在配置 YAML 中手工补充 models".into())
+            }
+        }
+    }
 
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -747,7 +780,7 @@ async fn provider_add(
         if yaml_str(item, "id").as_deref() == Some(pid.as_str()) {
             item["base_url"] = serde_yaml::Value::String(plan.base_url.clone());
             item["api_key_env"] = serde_yaml::Value::String(env_name.clone());
-            item["models"] = seq_of_strings(&plan.models);
+            item["models"] = seq_of_strings(&models);
             updated = true;
         }
     }
@@ -771,7 +804,7 @@ async fn provider_add(
         );
         map.insert(
             serde_yaml::Value::String("models".into()),
-            seq_of_strings(&plan.models),
+            seq_of_strings(&models),
         );
         list.push(serde_yaml::Value::Mapping(map));
     }
@@ -813,6 +846,15 @@ async fn provider_add(
     if let Some(obj) = payload.as_object_mut() {
         obj.insert("provider".into(), serde_json::json!(pid));
         obj.insert("api_key_env".into(), serde_json::json!(env_name));
+        obj.insert("models".into(), serde_json::json!(models.len()));
+        if !extra_warnings.is_empty() {
+            let w = obj
+                .entry("warnings")
+                .or_insert_with(|| serde_json::json!([]));
+            if let Some(arr) = w.as_array_mut() {
+                arr.extend(extra_warnings.into_iter().map(serde_json::Value::String));
+            }
+        }
     }
     json_response(code, payload)
 }
