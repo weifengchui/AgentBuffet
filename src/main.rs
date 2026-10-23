@@ -55,9 +55,7 @@ fn usage(code: i32) -> ! {
         \x20     buffetd agents detect|status       列出全部 agent 接入状态\n\
         \x20     buffetd agents attach <id> [--group g] [--dry-run]\n\
         \x20     buffetd agents detach <id>         还原（备份优先，逐字节）\n\
-        \x20     buffetd service install|uninstall  写/删 systemd 用户级自启单元\n\
-        \x20     buffetd import magpie [--from PATH] [--out PATH] [--force]\n\
-        \x20       导入 Magpie 的 providers.json，生成初始配置（Key 只进 env 文件）"
+        \x20     buffetd service install|uninstall  写/删 systemd 用户级自启单元"
     );
     std::process::exit(code);
 }
@@ -71,7 +69,6 @@ async fn main() {
         "reload" => reload_cmd().await,
         "agents" => agents_cmd(&args[1..]),
         "service" => service_cmd(&args[1..]),
-        "import" => import_cmd(&args[1..]),
         "help" | "-h" | "--help" => usage(0),
         other => {
             eprintln!("buffetd: 未知命令: {other}");
@@ -280,121 +277,6 @@ fn unit_path() -> PathBuf {
         .join("systemd")
         .join("user")
         .join("agentbuffet.service")
-}
-
-fn import_cmd(args: &[String]) {
-    if args.first().map(|s| s.as_str()) != Some("magpie") {
-        eprintln!("buffetd: 用法: buffetd import magpie [--from PATH] [--out PATH] [--force]");
-        std::process::exit(2);
-    }
-    let mut from: Option<PathBuf> = None;
-    let mut out: Option<PathBuf> = None;
-    let mut force = false;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--from" => {
-                i += 1;
-                let Some(v) = args.get(i) else {
-                    eprintln!("buffetd: --from 需要一个路径");
-                    std::process::exit(2);
-                };
-                from = Some(PathBuf::from(v));
-            }
-            "--out" => {
-                i += 1;
-                let Some(v) = args.get(i) else {
-                    eprintln!("buffetd: --out 需要一个路径");
-                    std::process::exit(2);
-                };
-                out = Some(PathBuf::from(v));
-            }
-            "--force" => force = true,
-            other => {
-                eprintln!("buffetd: 未知参数: {other}");
-                std::process::exit(2);
-            }
-        }
-        i += 1;
-    }
-    let from = from.unwrap_or_else(|| {
-        let cfg_dir = std::env::var("XDG_CONFIG_HOME")
-            .or_else(|_| std::env::var("HOME").map(|h| format!("{h}/.config")))
-            .unwrap_or_else(|_| ".".into());
-        PathBuf::from(cfg_dir).join("magpie").join("providers.json")
-    });
-    let out = out.unwrap_or_else(default_config_path);
-    if out.exists() && !force {
-        eprintln!(
-            "buffetd: {} 已存在，拒绝覆盖（--force 可覆盖）",
-            out.display()
-        );
-        std::process::exit(1);
-    }
-    let text = match std::fs::read_to_string(&from) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("buffetd: 读取 {} 失败: {e}", from.display());
-            std::process::exit(1);
-        }
-    };
-    let r = match agentbuffet::import::import_magpie(&text) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("buffetd: 导入失败: {e}");
-            std::process::exit(1);
-        }
-    };
-    // 生成后必须能通过启动校验，绝不落盘无效配置。
-    if let Err(errs) = agentbuffet::config::load_str(&r.yaml, "imported") {
-        eprintln!("buffetd: 生成的配置未通过校验: {errs:?}");
-        std::process::exit(1);
-    }
-    if let Some(dir) = out.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Err(e) = std::fs::write(&out, &r.yaml) {
-        eprintln!("buffetd: 写入 {} 失败: {e}", out.display());
-        std::process::exit(1);
-    }
-
-    // Key 只进 env 文件（0600），同名不覆盖。
-    let home = agentbuffet_home();
-    let _ = std::fs::create_dir_all(&home);
-    let env_path = home.join("env");
-    let mut written = 0usize;
-    let mut existing = std::fs::read_to_string(&env_path).unwrap_or_default();
-    for (name, key) in &r.env_keys {
-        if existing.lines().any(|l| l.starts_with(&format!("{name}="))) {
-            eprintln!("buffetd: [warn] env 中已有 {name}，保留原值不覆盖");
-            continue;
-        }
-        existing.push_str(&format!("{name}={key}\n"));
-        written += 1;
-    }
-    if written > 0 {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::write(&env_path, &existing) {
-            eprintln!("buffetd: 写入 {} 失败: {e}", env_path.display());
-            std::process::exit(1);
-        }
-        let _ = std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o600));
-    }
-
-    for w in &r.warnings {
-        eprintln!("buffetd: [warn] {w}");
-    }
-    println!("已导入 Magpie 配置 → {}", out.display());
-    if written > 0 {
-        println!(
-            "API Key 已写入 {}（0600），启动前请加载：set -a; . {}; set +a",
-            env_path.display(),
-            env_path.display()
-        );
-    }
-    println!(
-        "下一步：按需编辑 agents 段，然后 buffetd serve 启动，buffetd agents attach <id> 接入。"
-    );
 }
 
 fn service_cmd(args: &[String]) {

@@ -86,7 +86,6 @@ buffetd agents status          # 漂移检查
 | `buffetd reload` | 通知运行中的网关热重载配置（校验失败拒载，旧快照继续服务） |
 | `buffetd agents detect\|status\|attach\|detach` | 接入器 |
 | `buffetd service install\|uninstall` | 写/删 systemd 用户级自启单元（Linux） |
-| `buffetd import magpie [--from PATH] [--out PATH] [--force]` | 导入 Magpie 的 providers.json（默认 `~/.config/magpie/providers.json`），生成初始配置；API Key 只写入 `<home>/env`（0600），不进 YAML |
 
 环境变量：`AGENTBUFFET_CONFIG` 覆盖配置文件路径，`AGENTBUFFET_HOME` 覆盖数据目录（用量日志、Key 环境文件）。
 
