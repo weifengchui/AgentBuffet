@@ -13,6 +13,15 @@
   --chip: #182238; --chip-t: #9db4dd;
 }
 * { box-sizing: border-box; }
+/* 滚动条：纤细圆角、透明轨道，悬停/拖动渐亮，贴合深色主题 */
+* { scrollbar-width: thin; scrollbar-color: #2b3648 transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2b3648; border: 2px solid transparent;
+  border-radius: 999px; background-clip: padding-box; min-height: 28px; min-width: 28px; }
+::-webkit-scrollbar-thumb:hover { background: #3d4c66; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:active { background: var(--accent); border: 2px solid transparent; background-clip: padding-box; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
