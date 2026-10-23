@@ -268,7 +268,7 @@ buffetd agents status                 # 网关侧记录 vs Agent 实际配置的
 | M2 ✅ | 供应商管理 + order 故障转移 + 熔断 + 额度软上限与 429 被动校准 | mock server（allow_private）模拟 429/超时/流中断自动切换 |
 | M3 ✅ | JSONL 记录 + 内存今日聚合（含启动恢复）+ 价格表 + 快照式热重载 | 改配置不重启、重启后今日数据不丢、UI 刷新不扫盘 |
 | M4 ✅ | Web UI 四视图 + `/health` + 自启脚本 + **接入器（detect/attach/detach，OpenCode/Codex/通用三适配器）** | 开关一拨 Agent 即走网关；detach 后配置逐字节还原 |
-| M5 | 性能打磨 + 三平台打包 + CI（含 mock provider 与适配器 schema 测试） | 空闲 CPU<0.5%，内存<30MB |
+| M5 ✅ | 性能打磨 + 三平台打包 + CI（含 mock provider 与适配器 schema 测试） | 空闲 CPU<0.5%，内存<30MB |
 | v1.1 | Anthropic Messages 适配（含 Claude Code 接入）、smart 调度、model_map、订阅 token 接入 | — |
 
 #### 11. 开发约束（抄进 issue / PR 模板）

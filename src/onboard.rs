@@ -625,7 +625,8 @@ fn insert_before_first_table(text: &str, block: &str) -> String {
                 out.push('\n');
             }
             out.push_str(block);
-            out.push('\n');
+            // 块自带行尾换行，不再补空行：与 replace_region 的复写输出逐字节一致，
+            // 保证重复 apply 幂等（补空行会被第二次复写吞掉，导致每次注入都判定有变更）。
             for l in &lines[i..] {
                 out.push_str(l);
                 out.push('\n');
