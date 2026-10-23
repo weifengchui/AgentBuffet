@@ -166,7 +166,7 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
 /* ---------------- starmap ---------------- */
-#ov-map { position: relative; height: 320px; border: 1px solid var(--line); border-radius: 10px; margin-top: 10px;
+#ov-map { position: relative; height: 340px; border: 1px solid var(--line); border-radius: 10px; margin-top: 10px;
   overflow: hidden; background:
   radial-gradient(560px 300px at 50% 46%, rgba(79,140,255,.07), transparent 70%),
   linear-gradient(rgba(108,168,255,.04) 1px, transparent 1px) 0 0/40px 40px,
@@ -176,6 +176,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
 #ov-stars i { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #cfe3ff;
   opacity: .05; animation: twk 3s ease-in-out infinite alternate; }
 @keyframes twk { from { opacity: .03; } to { opacity: .25; } }
+#ov-recent-wrap { max-height: 440px; overflow: auto; margin-top: 8px; }
+#ov-recent-wrap thead th { position: sticky; top: 0; z-index: 2; background: var(--card); }
 #ov-map .lk { fill: none; stroke-width: 1.4; opacity: .16; transition: opacity .35s ease; }
 #ov-map .lk.live { opacity: .8; stroke-width: 2.1; filter: drop-shadow(0 0 4px rgba(160,210,255,.5)); }
 #ov-map .mlab { fill: #9aa7b8; font-size: 11px; text-anchor: middle; }
@@ -225,7 +227,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
         <div class="panel">
           <h3 data-i18n="ov.recent"></h3>
           <div class="muted" data-i18n="ov.recentHint"></div>
-          <div style="overflow-x:auto;margin-top:8px">
+          <div id="ov-recent-wrap">
           <table><thead><tr>
             <th data-i18n="col.time"></th><th>Agent</th><th data-i18n="col.group"></th><th data-i18n="col.provider"></th><th>Model</th>
             <th data-i18n="col.status"></th><th data-i18n="col.tokens"></th><th data-i18n="col.cost"></th><th data-i18n="col.dur"></th><th data-i18n="col.chain"></th>
@@ -558,11 +560,11 @@ async function loadMap() {
 function drawMap(agents, groups, providers, recent) {
   const svg = $("ov-svg"); if (!svg) return;
   if (!mapStars) { mapStars = true; let st = ""; for (let i = 0; i < 46; i++) st += `<i style="left:${(Math.random()*100).toFixed(2)}%;top:${(Math.random()*100).toFixed(2)}%;animation-duration:${(2+Math.random()*3).toFixed(2)}s;animation-delay:${(Math.random()*3).toFixed(2)}s"></i>`; $("ov-stars").innerHTML = st; }
-  const W = 1000, H = 320, cx = W / 2, cy = H / 2;
+  const W = 1000, H = 340, cx = W / 2, cy = H / 2;
   const pvIds = [...new Set(groups.flatMap(g => g.members.map(m => m.provider)))];
   const pvs = pvIds.map(id => providers.find(x => x.id === id) || { id, status: "disabled" });
   const pos = { gw: { x: cx, y: cy } };
-  const yAt = (i, n) => (H + 70) * (i + 1) / (n + 1) - 15;
+  const yAt = (i, n) => n === 1 ? cy : 46 + (H - 92) * i / (n - 1);
   agents.forEach((a, i) => pos["ag:" + a.agent_id] = { x: 132, y: yAt(i, agents.length) });
   pvs.forEach((x, i) => pos["pv:" + x.id] = { x: W - 132, y: yAt(i, pvs.length) });
   mapNodes = pos;
