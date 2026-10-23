@@ -161,6 +161,9 @@ enum FailKind {
     Rate429 { retry_after: Option<u64> },
     /// 401/403/缺 key：标记 degraded 需人工修 key
     Degraded,
+    /// 400/404/410/422：该 model 对此供应商无效（如 OpenRouter 无此 ID、410 已下架）。
+    /// 切换下一候选，但不计入熔断/degraded/额度——不是供应商健康失败。
+    ModelMismatch,
 }
 
 struct AttemptFail {
@@ -256,6 +259,15 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
         }
         base_headers.insert(k, v.clone());
     }
+    // OpenCode Zen/Go 套餐要求 x-opencode-session 头（上游按其做路由亲和）；
+    // 客户端未携带时注入每进程稳定的会话 ID，否则上游以 400 MissingSessionID 拒绝。
+    if avail.iter().any(|(_, p)| p.vendor == "opencode")
+        && !base_headers.contains_key(header::HeaderName::from_static("x-opencode-session"))
+    {
+        if let Ok(v) = HeaderValue::from_str(opencode_session_id()) {
+            base_headers.insert(header::HeaderName::from_static("x-opencode-session"), v);
+        }
+    }
 
     let fo = &snap.raw.failover;
     let max_attempts = 1 + fo.max_retries as usize;
@@ -335,6 +347,9 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
                     }
                     FailKind::Degraded => {
                         state.states.mark_degraded(&p.id, now2);
+                    }
+                    FailKind::ModelMismatch => {
+                        // 仅记最近失败原因（note_failure 已做），不改任何隔离状态
                     }
                 }
                 last_err = Some(fail.last);
@@ -553,6 +568,16 @@ async fn attempt_once(
             last: (429, format!("上游 {} 限流（429）", p.id)),
         });
     }
+    if matches!(code, 400 | 404 | 410 | 422) {
+        // 模型 ID 对本供应商无效（410=模型已下架）：带上游原文切换下一候选，全部失败时返回最后一个错误
+        let body = resp.text().await.unwrap_or_default();
+        let brief: String = body.chars().take(512).collect();
+        return Err(AttemptFail {
+            tag: code.to_string(),
+            kind: FailKind::ModelMismatch,
+            last: (code, format!("上游 {} {code}: {brief}", p.id)),
+        });
+    }
     if fo.retry_on_status.contains(&code) {
         return Err(AttemptFail {
             tag: code.to_string(),
@@ -560,7 +585,7 @@ async fn attempt_once(
             last: (code, format!("上游 {} 返回 {code}", p.id)),
         });
     }
-    // 不可重试的上游错误（如 400）：原样透传，换供应商也无意义
+    // 其他不可重试的上游错误（如 405/415）：原样透传，换供应商也无意义
     let mut r = passthrough_buffered(resp, status, &ctype).await;
     attach_chain(&mut r, &chain_line(chain, &p.id, &code.to_string()));
     Ok((
@@ -831,6 +856,24 @@ fn build_url(base: &str, rel: &str, query: Option<&str>) -> String {
         url.push_str(q);
     }
     url
+}
+
+/// 每进程稳定的 OpenCode 会话 ID（伪 UUID 格式），仅用于补齐 x-opencode-session 头。
+fn opencode_session_id() -> &'static str {
+    static SID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SID.get_or_init(|| {
+        let mut b = [0u8; 16];
+        let _ = getrandom::getrandom(&mut b);
+        let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        format!(
+            "{}-{}-{}-{}-{}",
+            &h[0..8],
+            &h[8..12],
+            &h[12..16],
+            &h[16..20],
+            &h[20..32]
+        )
+    })
 }
 
 fn is_hop_by_hop_or_strip(name: &HeaderName) -> bool {

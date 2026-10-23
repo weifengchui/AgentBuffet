@@ -87,6 +87,9 @@ async fn mock_chat(State(ms): State<MockState>, req: Request) -> Response {
     if model.contains("always-401") {
         return bad(401);
     }
+    if model.contains("always-400") {
+        return bad(400);
+    }
     if model.contains("hang") {
         // 挂死超过 first_byte_seconds(1s)：触发超时切换
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -249,6 +252,47 @@ async fn nonstream_fails_over_on_500() {
     assert_eq!(json["echo_model"], "ok-chat");
     assert_eq!(ms.count("always-500-chat"), 1);
     assert_eq!(ms.count("ok-chat"), 1);
+}
+
+#[tokio::test]
+async fn fails_over_on_model_mismatch_400() {
+    // 400/404/422 = 模型对该供应商无效：必须切换下一候选，而非透传
+    let (mock, ms) = spawn_mock().await;
+    let yaml = gw_config(
+        &[
+            prov("bad-400", &mock, &["always-400-chat"], None),
+            prov("good-1", &mock, &["ok-chat"], None),
+        ],
+        &[(1, "bad-400", "always-400-chat"), (2, "good-1", "ok-chat")],
+    );
+    let gw = spawn_gateway(&yaml).await;
+    let client = reqwest::Client::new();
+    let r = post_group(&client, &gw, false).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(chain_of(&r), "bad-400:400,good-1:ok");
+    let json: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(json["echo_model"], "ok-chat");
+    assert_eq!(ms.count("ok-chat"), 1);
+}
+
+#[tokio::test]
+async fn model_mismatch_does_not_degrade_or_trip_circuit() {
+    // 模型不匹配不得计入熔断窗口/degraded：连续多次请求仍每次尝试该候选
+    let (mock, _ms) = spawn_mock().await;
+    let yaml = gw_config(
+        &[
+            prov("bad-400", &mock, &["always-400-chat"], None),
+            prov("good-1", &mock, &["ok-chat"], None),
+        ],
+        &[(1, "bad-400", "always-400-chat"), (2, "good-1", "ok-chat")],
+    );
+    let gw = spawn_gateway(&yaml).await;
+    let client = reqwest::Client::new();
+    for i in 1..=3 {
+        let r = post_group(&client, &gw, false).await;
+        assert_eq!(r.status(), StatusCode::OK, "第 {i} 次请求");
+        assert_eq!(chain_of(&r), "bad-400:400,good-1:ok", "第 {i} 次链");
+    }
 }
 
 #[tokio::test]
