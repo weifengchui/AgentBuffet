@@ -8,6 +8,7 @@ Aggregate every model provider behind a single endpoint and give each agent its 
 buffet line with automatic priority-based failover.
 
 Idle CPU < 0.5% · RAM < 30 MB · single static binary
+*(measured on a typical personal setup: ~0% idle CPU, ~8 MB RSS)*
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
@@ -36,7 +37,7 @@ No database. No sidecar processes. No C runtime. One binary, done.
 
 | | |
 |---|---|
-| ⚡ **Featherweight** | Idle CPU < 0.5%, resident RAM < 30 MB, single static binary |
+| ⚡ **Featherweight** | Idle CPU < 0.5% & RAM < 30 MB under typical personal use (measured ~0% / ~8 MB), single static binary |
 | 🔀 **Failover** | Priority-ordered routing chain, sliding-window circuit breaker, quota soft caps, passive 429 calibration, first-chunk error switching |
 | 🔑 **Key rotation** | Multiple API keys per provider, round-robin; 401/403 auto-switches to the next key before failing over |
 | 🖥️ **Form-driven console** | Bilingual (zh/EN) web UI: pick vendor → pick plan → paste key. Drag-to-reorder routing, free-model badges, hot reload — no hand-written YAML required |
