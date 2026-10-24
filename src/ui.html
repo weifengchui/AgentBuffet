@@ -573,7 +573,7 @@ function switchView(v) {
   document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
   $("v-" + v).classList.add("on");
   $("tb-title").textContent = t("nav." + v);
-  renderActions(); tickClock();
+  renderActions(); renderPills(); tickClock();
   if (v === "overview") startMap(); else stopMap();
   window[LOADERS[v]]();
 }
