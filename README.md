@@ -56,7 +56,7 @@ No database. No sidecar processes. No C runtime. One binary, done.
 2. **Start the gateway:**
 
    ```bash
-   export DEEPSEEK_API_KEY=sk-...            # keys live only in the gateway's env
+   export DEEPSEEK_API_KEY=sk-...            # or put keys in ~/.agentbuffet/env (0600)
    ./AgentBuffet serve
    ```
 
@@ -154,8 +154,11 @@ the data directory (usage logs, key env file).
 ## Security
 
 - Admin API and console bind to loopback only; non-loopback requests get `403`.
-- Real API keys exist only in the gateway process environment — never in logs,
-  the UI, config files or agent configs (placeholders + last-4 mask only).
+- Real API keys are persisted only in `~/.agentbuffet/env` on this machine
+  (owner-only `0600`) and loaded into the gateway's process environment. They never
+  appear in `config.yaml`, logs, the UI or agent configs — those contain only
+  variable names, placeholders and a last-4 mask. Password-encrypted `.aback`
+  backups contain keys by design; nothing is ever sent off the machine.
 - `base_url` pointing at private/loopback IPs requires an explicit `allow_private: true` (fail-closed).
 - The attach writer only touches a whitelist of files, refuses to write on parse failure,
   and always backs up first.

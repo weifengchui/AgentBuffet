@@ -54,7 +54,7 @@
 2. 启动网关：
 
    ```bash
-   export DEEPSEEK_API_KEY=sk-...            # Key 只存在于网关进程环境
+   export DEEPSEEK_API_KEY=sk-...            # 或写入 ~/.agentbuffet/env（0600）由网关自动载入
    ./AgentBuffet serve
    ```
 
@@ -149,7 +149,7 @@ failover:
 ## 安全边界
 
 - 管理面（`/_admin`、UI）仅监听 loopback；非回环访问一律 `403`。
-- 真实 API Key 只存在于网关进程环境，不写入日志、UI、配置文件与 Agent 配置（只有占位符与末四位掩码）。
+- 真实 API Key 仅持久化在本机 `~/.agentbuffet/env` 文件（权限 0600，仅属主可读写），由网关载入进程环境；`config.yaml`、日志、UI 与 Agent 配置中只有变量名、占位符与末四位掩码。密码加密的 `.aback` 备份按设计包含密钥；任何密钥都不出本机。
 - `base_url` 指向私有/回环 IP 必须显式 `allow_private: true`（fail-closed）。
 - 接入器只写白名单文件，解析失败拒绝写入，绝不"尽力而为"，写前必备份。
 - 零上报：无遥测、不派生外部进程，模型目录拉取只是普通 HTTPS 请求。
