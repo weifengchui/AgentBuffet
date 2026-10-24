@@ -9,6 +9,8 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/agentlink-target}"
 LINUX_T=x86_64-unknown-linux-gnu
 WIN_T=x86_64-pc-windows-gnu
 DIST=dist
+VER=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+[ -n "$VER" ] || { echo "无法从 Cargo.toml 读取版本号"; exit 1; }
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
@@ -17,7 +19,7 @@ cargo build --release --target "$LINUX_T"
 mkdir -p "$DIST/agentbuffet-linux-x86_64"
 cp "$CARGO_TARGET_DIR/$LINUX_T/release/AgentBuffet" "$DIST/agentbuffet-linux-x86_64/"
 cp README.md "$DIST/agentbuffet-linux-x86_64/" 2>/dev/null || true
-tar czf "$DIST/agentbuffet-linux-x86_64.tar.gz" -C "$DIST" agentbuffet-linux-x86_64
+tar czf "$DIST/agentbuffet-linux-x86_64-v$VER.tar.gz" -C "$DIST" agentbuffet-linux-x86_64
 
 echo "==> Windows ($WIN_T)"
 if command -v zig >/dev/null 2>&1 || [ -x /tmp/opencode/zig14/zig ]; then
@@ -26,7 +28,7 @@ if command -v zig >/dev/null 2>&1 || [ -x /tmp/opencode/zig14/zig ]; then
   mkdir -p "$DIST/agentbuffet-windows-x86_64"
   cp "$CARGO_TARGET_DIR/$WIN_T/release/AgentBuffet.exe" "$DIST/agentbuffet-windows-x86_64/"
   cp README.md "$DIST/agentbuffet-windows-x86_64/" 2>/dev/null || true
-  (cd "$DIST" && python3 -m zipfile -c agentbuffet-windows-x86_64.zip agentbuffet-windows-x86_64)
+  (cd "$DIST" && python3 -m zipfile -c "agentbuffet-windows-x86_64-v$VER.zip" agentbuffet-windows-x86_64)
 else
   echo "跳过：未找到 zig（cargo-zigbuild 依赖）。安装 zig 后重跑本脚本即可产出 Windows 版。"
 fi
