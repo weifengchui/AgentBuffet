@@ -568,6 +568,7 @@ function renderActions() {
 }
 function switchView(v) {
   curView = v;
+  if (location.hash.slice(1) !== v) location.hash = v;
   document.querySelectorAll("#nav button").forEach(x => x.classList.toggle("on", x.dataset.v === v));
   document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
   $("v-" + v).classList.add("on");
@@ -1466,8 +1467,13 @@ async function copyConfig() {
 (async function init() {
   try { state.gw = (await api("/api/config")).gateway; } catch (e) { /* loopback only */ }
   applyLang();
-  startMap();
+  const v0 = location.hash.slice(1);
+  if (LOADERS[v0] && v0 !== curView) switchView(v0); else startMap();
 })();
+window.addEventListener("hashchange", () => {
+  const v = location.hash.slice(1);
+  if (LOADERS[v] && v !== curView) switchView(v);
+});
 </script>
 </body>
 </html>
