@@ -432,8 +432,10 @@ const t = (k) => I18N[lang][k] ?? I18N.zh[k] ?? k;
 const L = (zh, en) => lang === "zh" ? zh : en;
 const isFree = (m) => { const l = String(m || "").toLowerCase(); return l.endsWith(":free") || l.includes("free"); };
 const freeTag = () => `<span class="ftag">${L("免费", "free")}</span>`;
-const freeSort = (ms) => [...ms].sort((a, b) => (isFree(a) === isFree(b) ? String(a).localeCompare(String(b)) : isFree(a) ? -1 : 1));
-const freeOpt = (m) => `${esc(m)}${isFree(m) ? " · " + L("免费", "free") : ""}`;
+const freeIds = (pid) => { const p = (state.providers || []).find(x => x.id === pid); return p && p.free_models && p.free_models.length ? p.free_models : null; };
+const isFreeM = (pid, m) => { const fs = freeIds(pid); return fs ? fs.includes(m) : isFree(m); };
+const freeSort = (pid, ms) => [...ms].sort((a, b) => (isFreeM(pid, b) ? 1 : 0) - (isFreeM(pid, a) ? 1 : 0) || String(a).localeCompare(String(b)));
+const freeOpt = (pid, m) => `${esc(m)}${isFreeM(pid, m) ? " · " + L("免费", "free") : ""}`;
 
 function applyLang() {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
@@ -592,7 +594,7 @@ async function loadOverview() {
     $("ov-cost").textContent = "$" + (j.totals.cost_est ?? 0).toFixed(4);
     $("ov-recent").innerHTML = (j.recent || []).map(e => `<tr>
       <td class="muted">${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
-      <td>${esc(e.provider)}</td><td>${esc(e.model)}${isFree(e.model) ? freeTag() : ""}</td>
+      <td>${esc(e.provider)}</td><td>${esc(e.model)}${isFreeM(e.provider, e.model) ? freeTag() : ""}</td>
       <td><span class="pill ${e.status < 400 ? "on" : "off"}"><i></i>${e.status}</span></td>
       <td class="muted">${fmt(e.prompt_tokens)} / ${fmt(e.completion_tokens)}</td>
       <td>${e.cost_est == null ? "-" : "$" + e.cost_est.toFixed(4)}</td>
@@ -741,7 +743,7 @@ async function loadProviders() {
         ? `<div class="muted" style="color:var(--off)">✕ ${esc(p.last_fail_reason)} · ${tstr(p.last_fail_ts)}</div>` : "";
       const open = p.circuit_open_until
         ? `<div class="muted" style="color:var(--warn)">⏸ ${esc(L("熔断至", "open until"))} ${tstr(p.circuit_open_until)}</div>` : "";
-      const models = (p.models || []).length, freeN = (p.models || []).filter(isFree).length;
+      const models = (p.models || []).length, freeN = (p.free_models && p.free_models.length) ? p.free_models.length : (p.models || []).filter(isFree).length;
       return `<div class="pcard">
         <div class="pc-top"><span class="chip">${esc(p.vendor)}</span>
           <span class="pill ${STP[p.status] || "dim"}"><i></i>${esc(stLabel(p.status))}</span>
@@ -950,7 +952,7 @@ async function loadRouting() {
           </div></div>
         <table><thead><tr><th>#</th><th data-i18n="col.provider"></th><th>Model</th><th data-i18n="col.status"></th><th data-i18n="col.ops"></th></tr></thead>
         <tbody>${g.members.map(m => `<tr data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}" title="${esc(L("拖动调整组内优先级", "Drag to reorder priority"))}"><td class="muted">${m.priority}</td><td>${esc(m.provider)}</td>
-          <td><code>${esc(m.model)}</code>${isFree(m.model) ? freeTag() : ""}</td>
+          <td><code>${esc(m.model)}</code>${isFreeM(m.provider, m.model) ? freeTag() : ""}</td>
           <td>${m.disabled ? `<span class="pill dim"><i></i>${esc(L("已停用", "disabled"))}</span>` : `<span class="pill on"><i></i>${esc(L("可用", "ready"))}</span>`}</td>
           <td style="white-space:nowrap"><button class="btn sm ghost" data-act="tgl" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}">${esc(m.disabled ? L("启用", "Enable") : L("禁用", "Disable"))}</button>
           <button class="btn sm danger" data-act="del" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}" title="${esc(L("删除成员", "Remove member"))}">✕</button></td></tr>`).join("")}</tbody></table>
@@ -1034,7 +1036,7 @@ function quickAddMember(name) {
   const renderM = () => {
     const ms = (state.providers.find(x => x.id === $("qa-p").value) || {}).models || [];
     $("qa-mw").innerHTML = ms.length
-      ? `<select id="qa-m">${freeSort(ms).map(m => `<option value="${esc(m)}">${freeOpt(m)}</option>`).join("")}</select>`
+      ? `<select id="qa-m">${freeSort($("qa-p").value, ms).map(m => `<option value="${esc(m)}">${freeOpt($("qa-p").value, m)}</option>`).join("")}</select>`
       : `<input id="qa-m" type="text" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
   };
   $("qa-p").onchange = renderM; renderM();
@@ -1089,7 +1091,7 @@ function renderMembers() {
     const p = state.providers.find(x => x.id === r.provider);
     const ms = (p && p.models) || [];
     const modelCell = ms.length
-      ? `<select class="mm" data-i="${i}" data-f="model">${freeSort(ms).map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${freeOpt(m)}</option>`).join("")}</select>`
+      ? `<select class="mm" data-i="${i}" data-f="model">${freeSort(row.p, ms).map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${freeOpt(row.p, m)}</option>`).join("")}</select>`
       : `<input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
     return `<div class="mrow" data-i="${i}"><span class="grip" draggable="true" title="${esc(L("拖动排序", "Drag to reorder"))}">⠿</span>
       <span class="chip">#${i + 1}</span>
@@ -1195,7 +1197,7 @@ async function loadAgents() {
       const ms = g.members.filter(m => !m.disabled);
       if (!ms.length) return `<span class="muted">${esc(L("成员已全部停用", "all members disabled"))}</span>`;
       return `<div style="display:flex;flex-wrap:wrap;gap:4px">` + ms.map(m =>
-        `<span class="chip" title="${esc(m.provider)}">${esc(m.provider)}/${esc(m.model)}${isFree(m.model) ? freeTag() : ""}</span>`).join("") + `</div>`;
+        `<span class="chip" title="${esc(m.provider)}">${esc(m.provider)}/${esc(m.model)}${isFreeM(m.provider, m.model) ? freeTag() : ""}</span>`).join("") + `</div>`;
     };
     const rows = state.agents;
     $("ag-rows").innerHTML = rows.map(a => {

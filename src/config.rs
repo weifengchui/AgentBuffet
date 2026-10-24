@@ -51,6 +51,9 @@ pub struct Provider {
     pub api_key_env: String,
     #[serde(default)]
     pub models: Vec<String>,
+    /// 免费模型 ID 列表（拉取目录时按服务商定价字段或命名启发式判定，供 UI 精确标记）。
+    #[serde(default)]
+    pub free_models: Vec<String>,
     #[serde(default)]
     pub quota: Option<Quota>,
     #[serde(default)]

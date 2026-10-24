@@ -259,6 +259,7 @@ mod tests {
             base_url: "https://x.test/v1".into(),
             api_key_env: "K".into(),
             models: vec!["m".into()],
+            free_models: vec![],
             quota: quota.map(|daily_tokens| Quota { daily_tokens }),
             allow_private: false,
             disabled: false,

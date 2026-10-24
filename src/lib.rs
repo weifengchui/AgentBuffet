@@ -219,6 +219,7 @@ async fn providers_view(
                 "key_count": keys.len(),
                 "key_hints": key_hints,
                 "models": p.models,
+                "free_models": p.free_models,
                 "base_url": p.base_url,
                 "allow_private": p.allow_private,
                 "disabled": p.disabled,
@@ -903,14 +904,20 @@ async fn provider_add(
     let env_name = vendors::env_name(&pid);
     // 目录未给默认模型（如 OpenRouter）：先用 Key 试拉 /models，失败不阻断添加。
     let mut models = plan.models.clone();
+    let mut free: Vec<String> = Vec::new();
     let mut extra_warnings: Vec<String> = Vec::new();
     if models.is_empty() {
         match fetch_models_list(&st, &plan.base_url, &env_name, Some(&api_keys[0])).await {
-            Ok(m) => models = m,
+            Ok(pairs) => {
+                models = pairs.iter().map(|(m, _)| m.clone()).collect();
+                free = pairs.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
+            }
             Err(_) => extra_warnings.push(
                 "模型列表拉取失败：可在服务商卡片点「拉取模型」重试".into(),
             ),
         }
+    } else {
+        free = models.iter().filter(|m| free_rank(m) < 2).cloned().collect();
     }
 
     let text = match std::fs::read_to_string(&path) {
@@ -952,6 +959,11 @@ async fn provider_add(
             item["base_url"] = serde_yaml::Value::String(plan.base_url.clone());
             item["api_key_env"] = serde_yaml::Value::String(env_name.clone());
             item["models"] = seq_of_strings(&models);
+            if free.is_empty() {
+                item.as_mapping_mut().map(|m| m.remove(serde_yaml::Value::String("free_models".into())));
+            } else {
+                item["free_models"] = seq_of_strings(&free);
+            }
             updated = true;
         }
     }
@@ -977,6 +989,12 @@ async fn provider_add(
             serde_yaml::Value::String("models".into()),
             seq_of_strings(&models),
         );
+        if !free.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("free_models".into()),
+                seq_of_strings(&free),
+            );
+        }
         list.push(serde_yaml::Value::Mapping(map));
     }
 
@@ -1244,14 +1262,34 @@ fn free_rank(id: &str) -> u8 {
     }
 }
 
+/// 读取定价字段中的价格，缺失/不可解析返回 None。
+fn price_zero(entry: &serde_json::Value, k: &str) -> Option<bool> {
+    let v = entry.get("pricing")?.get(k)?;
+    let n = match v {
+        serde_json::Value::String(s) => s.trim().parse::<f64>().ok(),
+        serde_json::Value::Number(n) => n.as_f64(),
+        _ => None,
+    }?;
+    Some(n == 0.0)
+}
+
+/// 免费模型判定：优先服务商定价（prompt 与 completion 均为 0，如 OpenRouter），
+/// 无定价字段时退回名称启发式（`:free` 后缀或含 free，如 OpenCode 的 beam-free）。
+fn model_is_free(entry: &serde_json::Value, id: &str) -> bool {
+    match (price_zero(entry, "prompt"), price_zero(entry, "completion")) {
+        (Some(p), Some(c)) => p && c,
+        _ => free_rank(id) < 2,
+    }
+}
+
 /// 从服务商 `/models` 拉取模型目录：免费模型优先，上限 200 个。
-/// 优先用显式 Key，否则读 env（多数服务商 /models 公开，可匿名访问）。
+/// 返回 (模型 ID, 是否免费)。优先用显式 Key，否则读 env（多数服务商 /models 公开，可匿名访问）。
 async fn fetch_models_list(
     st: &proxy::AppState,
     base_url: &str,
     api_key_env: &str,
     key_override: Option<&str>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<(String, bool)>, String> {
     let url = format!("{}/models", base_url.trim_end_matches('/'));
     let key = match key_override {
         Some(k) => Some(k.to_string()),
@@ -1279,11 +1317,14 @@ async fn fetch_models_list(
         .and_then(|d| d.as_array())
         .or_else(|| j.get("models").and_then(|d| d.as_array()))
         .ok_or_else(|| "模型列表响应缺少 data 字段".to_string())?;
-    let mut ids: Vec<String> = arr
+    let mut ids: Vec<(String, bool)> = arr
         .iter()
-        .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+        .filter_map(|m| {
+            let id = m.get("id").and_then(|i| i.as_str())?;
+            Some((id.to_string(), model_is_free(m, id)))
+        })
         .collect();
-    ids.sort_by(|a, b| free_rank(a).cmp(&free_rank(b)).then_with(|| a.cmp(b)));
+    ids.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     ids.truncate(200);
     if ids.is_empty() {
         return Err("模型列表为空".to_string());
@@ -1295,7 +1336,7 @@ async fn fetch_models_list(
 async fn set_provider_models(
     st: &Arc<proxy::AppState>,
     id: String,
-    mut models: Vec<String>,
+    fetched: Vec<(String, bool)>,
 ) -> (StatusCode, serde_json::Value) {
     apply_config_edit(st, move |doc| {
         let list = doc
@@ -1306,16 +1347,28 @@ async fn set_provider_models(
             .iter_mut()
             .find(|i| yaml_str(i, "id").as_deref() == Some(id.as_str()))
             .ok_or_else(|| format!("provider 不存在: {id}"))?;
+        let mut models: Vec<String> = fetched.iter().map(|(m, _)| m.clone()).collect();
+        let mut free: Vec<String> = fetched.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
         // 合并保留原声明模型（可能被路由组引用），避免替换后校验失败
         if let Some(cur) = item.get("models").and_then(|v| v.as_sequence()) {
             for c in cur.iter().filter_map(|v| v.as_str()) {
                 if !models.iter().any(|m| m == c) {
                     models.push(c.to_string());
+                    if !free.iter().any(|f| f == c) && free_rank(c) < 2 {
+                        free.push(c.to_string());
+                    }
                 }
             }
         }
-        models.sort_by(|a, b| free_rank(a).cmp(&free_rank(b)).then_with(|| a.cmp(b)));
+        let isf = |m: &str| free.iter().any(|f| f == m);
+        models.sort_by(|a, b| isf(b).cmp(&isf(a)).then_with(|| a.cmp(b)));
+        free.sort();
         item["models"] = seq_of_strings(&models);
+        if free.is_empty() {
+            item.as_mapping_mut().map(|m| m.remove(serde_yaml::Value::String("free_models".into())));
+        } else {
+            item["free_models"] = seq_of_strings(&free);
+        }
         Ok(vec![])
     })
     .await
