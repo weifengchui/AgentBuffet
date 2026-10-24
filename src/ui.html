@@ -953,11 +953,11 @@ async function loadRouting() {
             <button class="btn sm danger" onclick="delGroup('${esc(g.name)}')">${esc(L("删除", "Delete"))}</button>
           </div></div>
         <table><thead><tr><th>#</th><th data-i18n="col.provider"></th><th>Model</th><th data-i18n="col.status"></th><th data-i18n="col.ops"></th></tr></thead>
-        <tbody>${g.members.map(m => `<tr data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}"><td class="ord" draggable="true" title="${esc(L("拖动调整组内优先级", "Drag to reorder priority"))}">⠿ ${m.priority}</td><td>${esc(m.provider)}</td>
+        <tbody>${g.members.map(m => `<tr data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}"><td class="ord" draggable="true">⠿ ${m.priority}</td><td>${esc(m.provider)}</td>
           <td><code>${esc(m.model)}</code>${isFreeM(m.provider, m.model) ? freeTag() : ""}</td>
           <td>${m.disabled ? `<span class="pill dim"><i></i>${esc(L("已停用", "disabled"))}</span>` : `<span class="pill on"><i></i>${esc(L("可用", "ready"))}</span>`}</td>
           <td style="white-space:nowrap"><button class="btn sm ghost" data-act="tgl" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}">${esc(m.disabled ? L("启用", "Enable") : L("禁用", "Disable"))}</button>
-          <button class="btn sm danger" data-act="del" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}" title="${esc(L("删除成员", "Remove member"))}">✕</button></td></tr>`).join("")}</tbody></table>
+          <button class="btn sm danger" data-act="del" data-g="${esc(g.name)}" data-p="${esc(m.provider)}" data-m="${esc(m.model)}">${esc(L("删除", "Delete"))}</button></td></tr>`).join("")}</tbody></table>
       </div>`).join("")
       || `<div class="empty"><div class="big">🧭</div><b>${esc(L("还没有路由组", "No routing groups yet"))}</b>${esc(L("路由组 = 一组「服务商 + 模型」的优先级列表，故障时自动转移", "A group is a prioritized list of provider/model pairs with automatic failover"))}</div>`;
     document.querySelectorAll("#rt-grid [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
