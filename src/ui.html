@@ -1192,7 +1192,7 @@ async function loadAgents() {
       if (!g || !g.members.length) return `<span class="muted">-</span>`;
       const ms = g.members.filter(m => !m.disabled);
       if (!ms.length) return `<span class="muted">${esc(L("成员已全部停用", "all members disabled"))}</span>`;
-      return `<div style="display:flex;flex-wrap:wrap;gap:4px">` + ms.map(m =>
+      return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:3px">` + ms.map(m =>
         `<span class="chip" title="${esc(m.provider)}">${esc(m.provider)}/${esc(m.model)}${isFreeM(m.provider, m.model) ? freeTag() : ""}</span>`).join("") + `</div>`;
     };
     const rows = state.agents;
