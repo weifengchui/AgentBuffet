@@ -434,7 +434,7 @@ function applyLang() {
   document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
   $("lang-btn").textContent = lang === "zh" ? "EN" : "中";
   $("tb-title").textContent = t("nav." + curView);
-  renderPills(); renderActions(); renderHint();
+  renderPills(); renderActions();
   const fn = window[LOADERS[curView]];
   if (fn) fn();
 }
@@ -537,8 +537,13 @@ function renderPills() {
 let curView = "overview";
 const LOADERS = { overview: "loadOverview", providers: "loadProviders",
   routing: "loadRouting", agents: "loadAgents", settings: "loadSettings" };
-const VIEW_HINTS = { providers: "pv.hint", routing: "rt.hint", agents: "ag.hint" };
-function renderHint() { const k = VIEW_HINTS[curView]; $("tb-hint").textContent = k ? t(k) : ""; }
+function tickClock() {
+  const el = $("tb-hint"); if (!el) return;
+  if (curView !== "overview") { el.textContent = ""; return; }
+  const d = new Date(), pad = (n) => String(n).padStart(2, "0");
+  el.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+setInterval(tickClock, 1000);
 function renderActions() {
   const a = [];
   if (curView === "providers") a.push(`<button class="btn primary sm" onclick="openAddWizard()">＋ ${esc(t("pv.add"))}</button>`);
@@ -553,7 +558,7 @@ function switchView(v) {
   document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
   $("v-" + v).classList.add("on");
   $("tb-title").textContent = t("nav." + v);
-  renderActions(); renderHint();
+  renderActions(); tickClock();
   if (v === "overview") startMap(); else stopMap();
   window[LOADERS[v]]();
 }
@@ -570,7 +575,6 @@ async function loadOverview() {
   try {
     const j = await api("/api/overview");
     state.totals = j.totals; state.date = j.date; renderPills();
-    $("tb-hint").textContent = L("日期", "Date") + " " + j.date;
     $("ov-req").textContent = fmt(j.totals.requests);
     $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
     $("ov-ct").textContent = fmt(j.totals.completion_tokens);
