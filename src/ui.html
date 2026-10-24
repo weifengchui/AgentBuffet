@@ -313,7 +313,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
           <hr class="sep">
           <div class="toolbar" style="margin-bottom:10px"><b class="muted" data-i18n="st.importB"></b></div>
           <div class="mrow">
-            <input id="bk-imp-file" type="file" accept=".aback" style="flex:1;border:none;padding:4px 0">
+            <button class="btn ghost" type="button" onclick="$('bk-imp-file').click()">📁 <span data-i18n="st.pickFile"></span></button>
+            <span class="muted" id="bk-imp-name"></span>
+            <input id="bk-imp-file" type="file" accept=".aback" style="display:none">
           </div>
           <div class="mrow">
             <input id="bk-imp-pw" type="password" style="flex:1" data-i18n-ph="st.importPw">
@@ -381,8 +383,9 @@ const I18N = {
     "st.autostart": "开机自启", "st.autostartHint": "登录（开机）后自动启动网关进程；Linux/WSL 使用 systemd 用户单元，macOS 使用 LaunchAgent，Windows 使用启动目录脚本",
     "st.asOn": "开机自动启动 AgentBuffet",
     "st.backup": "加密备份", "st.backupHint": "备份包含完整配置与全部 API Key，经 Argon2id + AES-256-GCM 加密",
-    "st.exportB": "导出备份", "st.exportPw": "设置备份密码", "st.doExport": "导出 .aback",
-    "st.importB": "导入备份", "st.importPw": "输入备份密码", "st.doImport": "选择文件并导入",
+    "st.exportB": "导出备份", "st.exportPw": "设置备份密码", "st.doExport": "导出",
+    "st.importB": "导入备份", "st.importPw": "输入备份密码", "st.doImport": "导入",
+    "st.pickFile": "选择文件", "st.noFile": "未选择文件",
     "st.warnKeys": "⚠ 备份文件包含密钥，请设置足够强的密码；忘记密码将无法恢复。",
     "st.adv": "高级：直接编辑 config.yaml",
     "st.advHint": "保存即校验（失败不落盘），成功后自动热重载。日常操作建议用上面的表单界面。",
@@ -413,8 +416,9 @@ const I18N = {
     "st.autostart": "Autostart", "st.autostartHint": "Start the gateway automatically at login/boot (systemd user unit on Linux/WSL, LaunchAgent on macOS, Startup folder script on Windows)",
     "st.asOn": "Start AgentBuffet at boot",
     "st.backup": "Encrypted backup", "st.backupHint": "Backup contains the full config and all API keys, sealed with Argon2id + AES-256-GCM",
-    "st.exportB": "Export backup", "st.exportPw": "Choose a backup password", "st.doExport": "Export .aback",
-    "st.importB": "Import backup", "st.importPw": "Backup password", "st.doImport": "Pick file & import",
+    "st.exportB": "Export backup", "st.exportPw": "Choose a backup password", "st.doExport": "Export",
+    "st.importB": "Import backup", "st.importPw": "Backup password", "st.doImport": "Import",
+    "st.pickFile": "Choose file", "st.noFile": "No file chosen",
     "st.warnKeys": "⚠ The backup contains secrets — choose a strong password; it cannot be recovered without it.",
     "st.adv": "Advanced: edit config.yaml directly",
     "st.advHint": "Saving validates first (nothing is written on failure) and hot-reloads on success. Prefer the forms above for daily use.",
@@ -437,6 +441,7 @@ function applyLang() {
   document.querySelectorAll("#nav button span[data-i18n]").forEach(el => { el.closest("button").dataset.tip = el.textContent; });
   $("collapse-btn").dataset.tip = L("收起/展开导航栏", "Collapse / expand sidebar");
   document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  if (!state.bkFile) $("bk-imp-name").textContent = t("st.noFile");
   $("lang-btn").textContent = lang === "zh" ? "EN" : "中";
   $("tb-title").textContent = t("nav." + curView);
   renderPills(); renderActions();
@@ -1408,18 +1413,26 @@ async function exportBackup() {
     toast(L("备份已导出（含全部 Key，已加密）：", "Encrypted backup exported (includes all keys): ") + r.filename, "ok");
   } catch (err) { toast(err.message, "bad"); }
 }
+$("bk-imp-file").onchange = () => {
+  const f = $("bk-imp-file").files[0];
+  state.bkFile = f || null;
+  $("bk-imp-name").textContent = f ? f.name : t("st.noFile");
+};
 async function importBackup() {
   const f = $("bk-imp-file").files[0];
   const pw = $("bk-imp-pw").value;
   if (!f) return toast(L("请先选择 .aback 备份文件", "Pick a .aback backup file first"), "warn");
   if (!pw) return toast(L("请输入备份密码", "Enter the backup password"), "warn");
-  const data = (await f.text()).trim();
+  const buf = new Uint8Array(await f.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  const data = btoa(bin);
   if (!await confirmM(t("st.importB"),
     L(`导入将整份替换当前 config.yaml（自动 .bak 备份）并合并 ${f.name} 中的 env 键，随后热重载。确定？`,
       `Import replaces config.yaml (auto .bak) and merges the env keys from ${f.name}, then hot-reloads. Proceed?`))) return;
   try {
     const r = await post("/_admin/import-enc", { password: pw, data_b64: data });
-    $("bk-imp-pw").value = ""; $("bk-imp-file").value = "";
+    $("bk-imp-pw").value = ""; $("bk-imp-file").value = ""; state.bkFile = null; $("bk-imp-name").textContent = t("st.noFile");
     (r.warnings || []).forEach(w => toast(w, "warn"));
     toast(L("导入成功，已合并 ", "Imported, merged ") + (r.env_keys ?? 0) + L(" 个 env 键并热重载", " env keys, hot-reloaded"), "ok");
     if (r.addr_changed) toast(L("监听地址有变化，需重启进程生效。", "Listen addresses changed — restart the process to apply."), "warn");
