@@ -1091,14 +1091,12 @@ function renderMembers() {
     const p = state.providers.find(x => x.id === r.provider);
     const ms = (p && p.models) || [];
     const modelCell = ms.length
-      ? `<select class="mm" data-i="${i}" data-f="model">${freeSort(row.p, ms).map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${freeOpt(row.p, m)}</option>`).join("")}</select>`
+      ? `<select class="mm" data-i="${i}" data-f="model">${freeSort(r.provider, ms).map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${freeOpt(r.provider, m)}</option>`).join("")}</select>`
       : `<input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
     return `<div class="mrow" data-i="${i}"><span class="grip" draggable="true" title="${esc(L("拖动排序", "Drag to reorder"))}">⠿</span>
       <span class="chip">#${i + 1}</span>
       <select class="mp" data-i="${i}" data-f="provider">${providerOpts(r.provider)}</select>
       ${modelCell}
-      <button class="btn sm ghost" data-act="up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
-      <button class="btn sm ghost" data-act="dn" data-i="${i}" ${i === gm.length - 1 ? "disabled" : ""}>↓</button>
       <button class="btn sm danger" data-act="rm" data-i="${i}">✕</button></div>`;
   }).join("");
   $("gm-list").querySelectorAll("select,input").forEach(el => {
@@ -1131,8 +1129,6 @@ function renderMembers() {
   $("gm-list").querySelectorAll("button").forEach(b => {
     b.onclick = () => {
       const i = +b.dataset.i;
-      if (b.dataset.act === "up" && i > 0) [gm[i - 1], gm[i]] = [gm[i], gm[i - 1]];
-      if (b.dataset.act === "dn" && i < gm.length - 1) [gm[i + 1], gm[i]] = [gm[i], gm[i + 1]];
       if (b.dataset.act === "rm") gm.splice(i, 1);
       renderMembers();
     };
