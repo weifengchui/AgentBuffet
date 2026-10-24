@@ -210,6 +210,17 @@
   .dl-note { text-align: center; margin-top: 26px; font-size: 13px; color: var(--dim); }
   .dl-note code { color: var(--acc2); background: rgba(56, 225, 198, .08); padding: 2px 8px; border-radius: 6px; font-family: ui-monospace, Consolas, monospace; }
 
+  /* ---------- sister product ---------- */
+  .sister-sec { padding: 6px 0 90px; }
+  .sister { display: flex; align-items: center; gap: 26px; border: 1px solid var(--line); border-radius: 20px; padding: 30px 34px; background: linear-gradient(120deg, rgba(79,140,255,.07), rgba(56,225,198,.05), rgba(167,139,250,.07)); transition: transform .25s, border-color .25s, box-shadow .25s; }
+  .sister:hover { transform: translateY(-4px); border-color: rgba(79,140,255,.45); box-shadow: 0 20px 60px rgba(4,8,18,.55); }
+  .s-mark { flex: 0 0 auto; width: 56px; height: 56px; border-radius: 16px; background: var(--grad); display: grid; place-items: center; font-size: 26px; font-weight: 900; color: #06121f; }
+  .s-kicker { font-size: 11.5px; letter-spacing: 2.5px; color: var(--acc2); font-weight: 700; margin-bottom: 6px; }
+  .s-body h3 { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
+  .s-body p { font-size: 13.5px; color: var(--dim); line-height: 1.75; max-width: 720px; }
+  .s-go { margin-left: auto; flex: 0 0 auto; font-size: 14px; font-weight: 700; color: var(--acc); white-space: nowrap; }
+  @media (max-width: 620px) { .sister { flex-direction: column; text-align: center; } .s-go { margin-left: 0; } }
+
   /* ---------- footer ---------- */
   footer { border-top: 1px solid var(--line); padding: 44px 0; }
   .foot { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
@@ -433,6 +444,20 @@
       <div class="dl-card rv d2"><div class="os">🪟</div><h3>Windows</h3><div class="arch">x86_64 · AgentBuffet.exe</div><a class="btn btn-p" href="#" data-dl="win">下载 .zip</a></div>
     </div>
     <p class="dl-note rv">下载始终指向 <a href="https://github.com/weifengchui/AgentBuffet/releases/latest" target="_blank" rel="noopener" style="color:var(--acc2)">Releases · 最新版</a>；校验：<code>sha256sum agentbuffet-*.tar.gz</code> 与发布页摘要比对。</p>
+  </div>
+</section>
+
+<section class="sister-sec">
+  <div class="wrap">
+    <a class="sister rv" href="https://weifengchui.github.io/AgentLink/" target="_blank" rel="noopener">
+      <div class="s-mark">L</div>
+      <div class="s-body">
+        <div class="s-kicker">SISTER PRODUCT · 姊妹产品</div>
+        <h3>AgentLink —— 局域网里的 AI Agent 消息总线</h3>
+        <p>AgentBuffet 让每个 Agent 吃饱吃好，AgentLink 让 Agent 之间彼此协作：多台机器上的 Agent 自动认识、可靠发消息、传文件、协同派活，星图实时看谁在给谁干活，同样是单二进制零依赖。</p>
+      </div>
+      <div class="s-go">了解一下 ↗</div>
+    </a>
   </div>
 </section>
 
