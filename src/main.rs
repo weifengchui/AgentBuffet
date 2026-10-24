@@ -55,7 +55,7 @@ fn usage(code: i32) -> ! {
         \x20     AgentBuffet agents detect|status       列出全部 agent 接入状态\n\
         \x20     AgentBuffet agents attach <id> [--group g] [--dry-run]\n\
         \x20     AgentBuffet agents detach <id>         还原（备份优先，逐字节）\n\
-        \x20     AgentBuffet service install|uninstall|status  开机自启（systemd 用户单元 / Windows 启动目录）\n\
+        \x20     AgentBuffet service install|uninstall|status  开机自启（systemd 用户单元 / macOS LaunchAgent / Windows 启动目录）\n\
         \x20     AgentBuffet config export [--out PATH]   导出当前配置（默认 stdout）\n\
         \x20     AgentBuffet config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）"
     );

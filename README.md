@@ -8,8 +8,8 @@
 - **路径式 Agent 识别**：`http://127.0.0.1:3425/<agent-id>/v1/...`，无需为每个 Agent 单独开端口。
 - **故障转移**：组内按 priority 依次尝试；熔断（滑动窗口）、额度软上限、429 被动校准、首 chunk 错误切换。
 - **零缓冲 SSE 透传**：流式响应逐 chunk 转发，不聚合、不等待。
-- **接入器**：一条命令把 OpenCode / Codex 配置注入网关（写入前备份，卸载逐字节还原；真实 Key 永不落 Agent 配置）。控制台自动检测本机已安装的 Agent，一键创建并接入。
-- **Web 控制台**：AgentLink 风格深色界面，五视图（概览 / 服务商 / 路由 / 接入器 / 设置），中英双语，仅监听 loopback。日常配置全部表单化：选厂商 → 选套餐 → 贴 Key 即添加服务商；同一服务商可管理多个 API Key（逗号分隔存于 env，请求按轮转分摊、鉴权失败自动换 Key，全部失败才转移其他服务商）；路由组、Agent、网关参数均可在界面增删改，热重载即时生效，无需手写 YAML（YAML 编辑器保留为高级折叠项）。
+- **接入器**：一条命令把 OpenCode / Codex 配置注入网关（写入前备份，卸载逐字节还原；真实 Key 永不落 Agent 配置）。控制台自动检测本机已安装的 Agent，一键创建并接入；支持 OpenCode 多实例（每实例独立配置文件与流量前缀），配置漂移自动检测并全自动修复。
+- **Web 控制台**：AgentLink 风格深色界面，五视图（概览 / 服务商 / 路由 / 接入器 / 设置），中英双语，仅监听 loopback。日常配置全部表单化：选厂商 → 选套餐 → 贴 Key 即添加服务商；同一服务商可管理多个 API Key（逗号分隔存于 env，请求按轮转分摊、鉴权失败自动换 Key，全部失败才转移其他服务商）；路由组、Agent、网关参数均可在界面增删改，热重载即时生效，无需手写 YAML（YAML 编辑器保留为高级折叠项）。服务商模型目录自动拉取并标识免费模型，路由组与组内成员均支持拖拽排序，配置可密码加密导出/导入。
 
 ## 快速开始
 
@@ -85,7 +85,9 @@ AgentBuffet agents status          # 漂移检查
 | `AgentBuffet [serve]` | 启动网关（默认子命令） |
 | `AgentBuffet reload` | 通知运行中的网关热重载配置（校验失败拒载，旧快照继续服务） |
 | `AgentBuffet agents detect\|status\|attach\|detach` | 接入器 |
-| `AgentBuffet service install\|uninstall` | 写/删 systemd 用户级自启单元（Linux） |
+| `AgentBuffet service install\|uninstall\|status` | 开机自启：Linux 写 systemd 用户单元，macOS 写 LaunchAgent plist，Windows 写启动目录脚本（均为纯文件系统操作） |
+| `AgentBuffet config export [--out PATH]` | 导出当前配置（默认 stdout） |
+| `AgentBuffet config import PATH` | 导入整份配置（校验失败不落盘，原文件自动备份 .bak） |
 
 环境变量：`AGENTBUFFET_CONFIG` 覆盖配置文件路径，`AGENTBUFFET_HOME` 覆盖数据目录（用量日志、Key 环境文件）。
 
@@ -94,6 +96,7 @@ AgentBuffet agents status          # 漂移检查
 - 管理面（`/_admin`、UI）仅监听 loopback；非 loopback 访问一律 403。
 - 真实 API Key 只存在于网关进程环境，不写入日志、UI、配置文件；Agent 配置里只有占位符。
 - 加密备份（`.aback`）：设置视图可将配置 + 全部 Key 打包，经 Argon2id + AES-256-GCM 密码加密后导出；导入自动校验并热重载，密码遗忘则无法恢复。
+- 开机自启与模型目录拉取均为纯文件系统 / HTTP 操作，不派生任何外部进程，维持单二进制零运行时依赖。
 - provider `base_url` 指向私有/回环 IP 必须显式 `allow_private: true`（fail-closed）。
 - 接入器只写白名单文件，解析失败拒绝写入，绝不"尽力而为"。
 
