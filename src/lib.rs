@@ -52,6 +52,7 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
         .route("/_admin/provider/edit", post(provider_edit))
         .route("/_admin/provider/delete", post(provider_delete))
         .route("/_admin/provider/keys", post(provider_keys))
+        .route("/_admin/provider/models", post(provider_fetch_models))
         .route("/_admin/group", post(group_upsert))
         .route("/_admin/group/delete", post(group_delete))
         .route("/_admin/agent", post(agent_upsert))
@@ -904,33 +905,11 @@ async fn provider_add(
     let mut models = plan.models.clone();
     let mut extra_warnings: Vec<String> = Vec::new();
     if models.is_empty() {
-        let url = format!("{}/models", plan.base_url.trim_end_matches('/'));
-        let sent = tokio::time::timeout(
-            Duration::from_secs(5),
-            st.client.get(&url).bearer_auth(&api_keys[0]).send(),
-        )
-        .await;
-        match sent {
-            Ok(Ok(resp)) if resp.status().is_success() => {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(j) => {
-                        if let Some(arr) = j.get("data").and_then(|d| d.as_array()) {
-                            models = arr
-                                .iter()
-                                .filter_map(|m| {
-                                    m.get("id").and_then(|i| i.as_str()).map(String::from)
-                                })
-                                .take(100)
-                                .collect();
-                        }
-                    }
-                    Err(_) => extra_warnings
-                        .push("模型列表解析失败：可稍后在配置 YAML 中手工补充 models".into()),
-                }
-            }
-            _ => {
-                extra_warnings.push("模型列表拉取失败：可稍后在配置 YAML 中手工补充 models".into())
-            }
+        match fetch_models_list(&st, &plan.base_url, &env_name, Some(&api_keys[0])).await {
+            Ok(m) => models = m,
+            Err(_) => extra_warnings.push(
+                "模型列表拉取失败：可在服务商卡片点「拉取模型」重试".into(),
+            ),
         }
     }
 
@@ -1251,6 +1230,157 @@ async fn provider_edit(
         }
     }
     json_response(code, payload)
+}
+
+/// 免费模型排序权重：`:free` 后缀最前，其次名称含 free，其余按字母序。
+fn free_rank(id: &str) -> u8 {
+    let l = id.to_lowercase();
+    if l.ends_with(":free") {
+        0
+    } else if l.contains("free") {
+        1
+    } else {
+        2
+    }
+}
+
+/// 从服务商 `/models` 拉取模型目录：免费模型优先，上限 200 个。
+/// 优先用显式 Key，否则读 env（多数服务商 /models 公开，可匿名访问）。
+async fn fetch_models_list(
+    st: &proxy::AppState,
+    base_url: &str,
+    api_key_env: &str,
+    key_override: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let key = match key_override {
+        Some(k) => Some(k.to_string()),
+        None => std::env::var(api_key_env)
+            .ok()
+            .and_then(|v| proxy::split_keys(&v).into_iter().next()),
+    };
+    let mut req = st.client.get(&url);
+    if let Some(k) = &key {
+        req = req.bearer_auth(k);
+    }
+    let resp = tokio::time::timeout(Duration::from_secs(15), req.send())
+        .await
+        .map_err(|_| "模型列表拉取超时".to_string())?
+        .map_err(|e| format!("模型列表拉取失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("模型列表拉取失败: HTTP {}", resp.status()));
+    }
+    let j: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("模型列表解析失败: {e}"))?;
+    let arr = j
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| j.get("models").and_then(|d| d.as_array()))
+        .ok_or_else(|| "模型列表响应缺少 data 字段".to_string())?;
+    let mut ids: Vec<String> = arr
+        .iter()
+        .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+        .collect();
+    ids.sort_by(|a, b| free_rank(a).cmp(&free_rank(b)).then_with(|| a.cmp(b)));
+    ids.truncate(200);
+    if ids.is_empty() {
+        return Err("模型列表为空".to_string());
+    }
+    Ok(ids)
+}
+
+/// 将拉到的模型列表写入 config.yaml 的 provider 条目并热重载。
+async fn set_provider_models(
+    st: &Arc<proxy::AppState>,
+    id: String,
+    mut models: Vec<String>,
+) -> (StatusCode, serde_json::Value) {
+    apply_config_edit(st, move |doc| {
+        let list = doc
+            .get_mut("providers")
+            .and_then(|v| v.as_sequence_mut())
+            .ok_or_else(|| "providers 字段缺失或不是列表".to_string())?;
+        let item = list
+            .iter_mut()
+            .find(|i| yaml_str(i, "id").as_deref() == Some(id.as_str()))
+            .ok_or_else(|| format!("provider 不存在: {id}"))?;
+        // 合并保留原声明模型（可能被路由组引用），避免替换后校验失败
+        if let Some(cur) = item.get("models").and_then(|v| v.as_sequence()) {
+            for c in cur.iter().filter_map(|v| v.as_str()) {
+                if !models.iter().any(|m| m == c) {
+                    models.push(c.to_string());
+                }
+            }
+        }
+        models.sort_by(|a, b| free_rank(a).cmp(&free_rank(b)).then_with(|| a.cmp(b)));
+        item["models"] = seq_of_strings(&models);
+        Ok(vec![])
+    })
+    .await
+}
+
+/// POST /_admin/provider/models {id}：手动触发拉取服务商模型目录。
+async fn provider_fetch_models(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Json(body): Json<IdReq>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let id = body.id.clone();
+    let Some(p) = st.snap.read().await.providers.get(&id).cloned() else {
+        return json_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error": format!("provider 不存在: {id}")}),
+        );
+    };
+    let models = match fetch_models_list(&st, &p.base_url, &p.api_key_env, None).await {
+        Ok(m) => m,
+        Err(e) => {
+            return json_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({"error": e}),
+            )
+        }
+    };
+    let count = models.len();
+    let (code, mut payload) = set_provider_models(&st, id, models).await;
+    if code == StatusCode::OK {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("models_fetched".into(), serde_json::json!(count));
+        }
+    }
+    json_response(code, payload)
+}
+
+/// 启动时自动为 models 为空的服务商拉取模型目录（如 OpenRouter 的免费模型目录），
+/// 让 UI 下拉框可直接选模型；失败仅记日志，不阻断启动。
+pub async fn auto_fetch_models(st: Arc<proxy::AppState>) {
+    // 等 env 文件载入与服务就绪
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let targets: Vec<(String, String, String)> = {
+        let snap = st.snap.read().await;
+        snap.providers
+            .values()
+            .filter(|p| p.models.is_empty() && !p.disabled)
+            .map(|p| (p.id.clone(), p.base_url.clone(), p.api_key_env.clone()))
+            .collect()
+    };
+    for (id, base_url, env) in targets {
+        match fetch_models_list(&st, &base_url, &env, None).await {
+            Ok(models) => {
+                let n = models.len();
+                let (code, _) = set_provider_models(&st, id.clone(), models).await;
+                if code == StatusCode::OK {
+                    println!("已为服务商 {id} 自动拉取 {n} 个模型");
+                }
+            }
+            Err(e) => eprintln!("服务商 {id} 模型目录自动拉取失败: {e}"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

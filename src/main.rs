@@ -145,6 +145,12 @@ async fn serve() {
         });
     }
 
+    // 启动自动拉取：models 为空的服务商（如 OpenRouter）自动补齐模型目录
+    {
+        let st = state.clone();
+        tokio::spawn(async move { agentbuffet::auto_fetch_models(st).await; });
+    }
+
     let gateway_app = agentbuffet::build_router(state.clone());
     let admin_app = agentbuffet::build_admin_router(state.clone());
 

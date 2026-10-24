@@ -61,6 +61,9 @@ header.top { position: sticky; top: 0; z-index: 20; display: flex; align-items: 
   padding: 12px 24px; background: rgba(11,14,20,.78); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line); }
 header.top h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.tb-hd { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#tb-hint { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-actions { display: flex; gap: 8px; align-items: center; }
 .pills { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 #content { padding: 22px 24px 60px; max-width: 1240px; width: 100%; margin: 0 auto; }
 .view { display: none; } .view.on { display: block; }
@@ -223,14 +226,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
     </div>
   </aside>
   <div class="main">
-    <header class="top"><h2 id="tb-title"></h2><div class="pills" id="tb-pills"></div></header>
+    <header class="top">
+      <div class="tb-hd"><h2 id="tb-title"></h2><span id="tb-hint" class="muted"></span></div>
+      <div class="pills" id="tb-pills"></div>
+      <div class="tb-actions" id="tb-actions"></div>
+    </header>
     <main id="content">
 
       <section id="v-overview" class="view on">
-        <div class="toolbar">
-          <button class="btn ghost sm" onclick="doRefresh(this,'loadOverview')" data-i18n="common.refresh"></button>
-          <span class="muted" id="ov-date"></span>
-        </div>
         <div class="cards">
           <div class="stat"><div class="k" data-i18n="ov.req"></div><div class="v" id="ov-req">-</div></div>
           <div class="stat"><div class="k" data-i18n="ov.pt"></div><div class="v" id="ov-pt">-</div></div>
@@ -256,29 +259,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
       </section>
 
       <section id="v-providers" class="view">
-        <div class="toolbar">
-          <button class="btn primary" onclick="openAddWizard()">＋ <span data-i18n="pv.add"></span></button>
-          <button class="btn ghost sm" onclick="doRefresh(this,'loadProviders')" data-i18n="common.refresh"></button>
-          <span class="muted" data-i18n="pv.hint"></span>
-        </div>
         <div class="pgrid" id="pv-grid"></div>
       </section>
 
       <section id="v-routing" class="view">
-        <div class="toolbar">
-          <button class="btn primary" onclick="openGroup()">＋ <span data-i18n="rt.add"></span></button>
-          <button class="btn ghost sm" onclick="doRefresh(this,'loadRouting')" data-i18n="common.refresh"></button>
-          <span class="muted" data-i18n="rt.hint"></span>
-        </div>
         <div id="rt-grid"></div>
       </section>
 
       <section id="v-agents" class="view">
-        <div class="toolbar">
-          <button class="btn primary" onclick="openAgent()">＋ <span data-i18n="ag.add"></span></button>
-          <button class="btn ghost sm" onclick="doRefresh(this,'loadAgents')" data-i18n="common.refresh"></button>
-          <span class="muted" data-i18n="ag.hint"></span>
-        </div>
         <div class="panel" id="ag-detect" style="display:none">
           <h3 data-i18n="ag.detect"></h3>
           <div class="muted" data-i18n="ag.detectHint"></div>
@@ -441,11 +429,12 @@ const L = (zh, en) => lang === "zh" ? zh : en;
 function applyLang() {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
-  document.querySelectorAll("#nav button span[data-i18n]").forEach(el => { el.closest("button").title = el.textContent; });
+  document.querySelectorAll("#nav button span[data-i18n]").forEach(el => { el.closest("button").dataset.tip = el.textContent; });
+  $("collapse-btn").dataset.tip = L("收起/展开导航栏", "Collapse / expand sidebar");
   document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
   $("lang-btn").textContent = lang === "zh" ? "EN" : "中";
   $("tb-title").textContent = t("nav." + curView);
-  renderPills();
+  renderPills(); renderActions(); renderHint();
   const fn = window[LOADERS[curView]];
   if (fn) fn();
 }
@@ -466,6 +455,9 @@ const post = (path, body) => api(path, {
 });
 let glTip = null;
 document.addEventListener("mousemove", (e) => {
+  if (e.target.closest && e.target.closest("#nav") && !document.body.classList.contains("sb-collapsed")) {
+    if (glTip) glTip.style.display = "none"; return;
+  }
   let txt = null;
   for (let n = e.target; n && n !== document.documentElement; n = n.parentElement || n.parentNode) {
     if (n.nodeType !== 1) continue;
@@ -545,12 +537,23 @@ function renderPills() {
 let curView = "overview";
 const LOADERS = { overview: "loadOverview", providers: "loadProviders",
   routing: "loadRouting", agents: "loadAgents", settings: "loadSettings" };
+const VIEW_HINTS = { providers: "pv.hint", routing: "rt.hint", agents: "ag.hint" };
+function renderHint() { const k = VIEW_HINTS[curView]; $("tb-hint").textContent = k ? t(k) : ""; }
+function renderActions() {
+  const a = [];
+  if (curView === "providers") a.push(`<button class="btn primary sm" onclick="openAddWizard()">＋ ${esc(t("pv.add"))}</button>`);
+  if (curView === "routing") a.push(`<button class="btn primary sm" onclick="openGroup()">＋ ${esc(t("rt.add"))}</button>`);
+  if (curView === "agents") a.push(`<button class="btn primary sm" onclick="openAgent()">＋ ${esc(t("ag.add"))}</button>`);
+  if (curView !== "settings") a.push(`<button class="btn ghost sm" onclick="doRefresh(this,'${LOADERS[curView]}')">${esc(t("common.refresh"))}</button>`);
+  $("tb-actions").innerHTML = a.join("");
+}
 function switchView(v) {
   curView = v;
   document.querySelectorAll("#nav button").forEach(x => x.classList.toggle("on", x.dataset.v === v));
   document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
   $("v-" + v).classList.add("on");
   $("tb-title").textContent = t("nav." + v);
+  renderActions(); renderHint();
   if (v === "overview") startMap(); else stopMap();
   window[LOADERS[v]]();
 }
@@ -567,7 +570,7 @@ async function loadOverview() {
   try {
     const j = await api("/api/overview");
     state.totals = j.totals; state.date = j.date; renderPills();
-    $("ov-date").textContent = L("日期", "Date") + " " + j.date;
+    $("tb-hint").textContent = L("日期", "Date") + " " + j.date;
     $("ov-req").textContent = fmt(j.totals.requests);
     $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
     $("ov-ct").textContent = fmt(j.totals.completion_tokens);
@@ -581,7 +584,7 @@ async function loadOverview() {
       <td class="muted">${e.duration_ms} ms</td>
       <td>${(e.fail_chain || []).map(h => { const i = h.lastIndexOf(":"); const p = i > 0 ? h.slice(0, i) : h, st = i > 0 ? h.slice(i + 1) : "";
         const c = { ok: "#3fb950", degraded: "#f85149", circuit_open: "#d29922", quota_exhausted: "#d29922" }[st] || "#50607a";
-        return `<span class="fc" title="${esc(st || "-")}"><i style="background:${c}"></i>${esc(p)}</span>`; }).join('<span class="muted">→</span>') || `<span class="muted">-</span>`}</td>
+        return `<span class="fc" title="${esc(st ? stLabel(st) : "-")}"><i style="background:${c}"></i>${esc(p)}</span>`; }).join('<span class="muted">→</span>') || `<span class="muted">-</span>`}</td>
     </tr>`).join("")
       || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
     return true;
@@ -733,6 +736,7 @@ async function loadProviders() {
         <div class="pc-ops">
           <button class="btn sm" onclick="testProvider('${esc(p.id)}',this)">${esc(L("测试", "Test"))}</button>
           <button class="btn sm ghost" onclick="openKeys('${esc(p.id)}')">${esc(L("密钥", "Keys"))}</button>
+          <button class="btn sm ghost" onclick="fetchModels('${esc(p.id)}',this)">${esc(L("拉取模型", "Fetch models"))}</button>
           <button class="btn sm ghost" onclick="openEdit('${esc(p.id)}')">${esc(L("编辑", "Edit"))}</button>
           <button class="btn sm ghost" onclick="toggleDisabled('${esc(p.id)}')">${p.disabled || p.status === "disabled" ? esc(L("启用", "Enable")) : esc(L("停用", "Disable"))}</button>
           <button class="btn sm danger" onclick="delProvider('${esc(p.id)}')">${esc(L("删除", "Delete"))}</button>
@@ -740,6 +744,17 @@ async function loadProviders() {
     }).join("") || `<div class="empty" style="grid-column:1/-1"><div class="big">🛒</div><b>${esc(L("还没有服务商", "No providers yet"))}</b>${esc(L("点右上角「添加服务商」，选厂商 → 选套餐 → 贴 Key，三步完成", "Click “Add provider”: pick vendor → pick plan → paste key. Three steps."))}</div>`;
     return true;
   } catch (err) { toast(err.message, "bad"); return false; }
+}
+
+async function fetchModels(id, btn) {
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = L("拉取中…", "Fetching…");
+  try {
+    const j = await post("/_admin/provider/models", { id });
+    toast(L(`已拉取 ${j.models_fetched} 个模型`, `Fetched ${j.models_fetched} models`), "ok");
+    await loadProviders();
+  } catch (e) { toast(e.message, "bad"); btn.disabled = false; btn.textContent = label; }
 }
 
 async function catalog() {
