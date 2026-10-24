@@ -472,8 +472,10 @@ document.addEventListener("mousemove", (e) => {
     if (n.dataset && n.dataset.tip) { txt = n.dataset.tip; break; }
     const t = n.getAttribute && n.getAttribute("title");
     if (t) { n.setAttribute("data-tip", t); n.removeAttribute("title"); txt = t; break; }
-    const ch = n.querySelector && n.querySelector("title");
-    if (ch && ch.textContent) { n.dataset.tip = ch.textContent; ch.remove(); txt = n.dataset.tip; break; }
+    if (n.namespaceURI === "http://www.w3.org/2000/svg") {
+      const ch = Array.from(n.children).find(c => c.localName === "title");
+      if (ch && ch.textContent) { n.dataset.tip = ch.textContent; ch.remove(); txt = n.dataset.tip; break; }
+    }
   }
   if (!txt) { if (glTip) glTip.style.display = "none"; return; }
   if (!glTip) { glTip = document.createElement("div"); glTip.id = "gl-tip"; document.body.appendChild(glTip); }
