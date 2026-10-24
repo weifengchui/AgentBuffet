@@ -1,21 +1,105 @@
-# AgentBuffet
+<div align="center">
 
-极低功耗的本地 AI 模型 API 网关：一个 `AgentBuffet` 二进制，把多家模型供应商聚合成统一入口，为每个 Agent 提供按优先级自动故障转移的"自助餐台"。空闲 CPU < 0.5%、常驻内存 < 30MB。
+# 🍱 AgentBuffet
 
-## 特性
+**A tiny, local AI model API gateway — one binary, zero runtime dependencies.**
 
-- **单二进制、零运行时依赖**：不依赖外部进程、数据库、GUI 框架；静态聚合，装完即用。
-- **路径式 Agent 识别**：`http://127.0.0.1:3425/<agent-id>/v1/...`，无需为每个 Agent 单独开端口。
-- **故障转移**：组内按 priority 依次尝试；熔断（滑动窗口）、额度软上限、429 被动校准、首 chunk 错误切换。
-- **零缓冲 SSE 透传**：流式响应逐 chunk 转发，不聚合、不等待。
-- **接入器**：一条命令把 OpenCode / Codex 配置注入网关（写入前备份，卸载逐字节还原；真实 Key 永不落 Agent 配置）。控制台自动检测本机已安装的 Agent，一键创建并接入；支持 OpenCode 多实例（每实例独立配置文件与流量前缀），配置漂移自动检测并全自动修复。
-- **Web 控制台**：AgentLink 风格深色界面，五视图（概览 / 服务商 / 路由 / 接入器 / 设置），中英双语，仅监听 loopback。日常配置全部表单化：选厂商 → 选套餐 → 贴 Key 即添加服务商；同一服务商可管理多个 API Key（逗号分隔存于 env，请求按轮转分摊、鉴权失败自动换 Key，全部失败才转移其他服务商）；路由组、Agent、网关参数均可在界面增删改，热重载即时生效，无需手写 YAML（YAML 编辑器保留为高级折叠项）。服务商模型目录自动拉取并标识免费模型，路由组与组内成员均支持拖拽排序，配置可密码加密导出/导入。
+Aggregate every model provider behind a single endpoint and give each agent its own
+buffet line with automatic priority-based failover.
 
-## 快速开始
+Idle CPU < 0.5% · RAM < 30 MB · single static binary
 
-1. 从 [Releases](../../releases) 下载对应平台的压缩包，解压得到 `AgentBuffet`。
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-2. 写配置 `~/.agentbuffet/config.yaml`：
+[![Release](https://img.shields.io/github/v/release/weifengchui/AgentBuffet?label=release&color=4f8cff)](https://github.com/weifengchui/AgentBuffet/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/weifengchui/AgentBuffet/actions/workflows/ci.yml/badge.svg)](https://github.com/weifengchui/AgentBuffet/actions/workflows/ci.yml)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](https://github.com/weifengchui/AgentBuffet/releases/latest)
+
+[🌐 Product page](https://weifengchui.github.io/AgentBuffet/) · [⬇ Download](https://github.com/weifengchui/AgentBuffet/releases/latest)
+
+</div>
+
+---
+
+## Why?
+
+You juggle OpenCode, Codex, Hermes and a drawer full of provider API keys. Every
+provider has its own quota, rate limits and outages — and every agent config has to
+know all of that. **AgentBuffet sits in between**: agents talk to one local endpoint,
+the gateway routes each request across providers with automatic failover, rotates API
+keys, tracks usage and keeps every real key on this machine only.
+
+No database. No sidecar processes. No C runtime. One binary, done.
+
+## Highlights
+
+| | |
+|---|---|
+| ⚡ **Featherweight** | Idle CPU < 0.5%, resident RAM < 30 MB, single static binary |
+| 🔀 **Failover** | Priority-ordered routing chain, sliding-window circuit breaker, quota soft caps, passive 429 calibration, first-chunk error switching |
+| 🔑 **Key rotation** | Multiple API keys per provider, round-robin; 401/403 auto-switches to the next key before failing over |
+| 🖥️ **Form-driven console** | Bilingual (zh/EN) web UI: pick vendor → pick plan → paste key. Drag-to-reorder routing, free-model badges, hot reload — no hand-written YAML required |
+| 🔌 **Agent attach** | Auto-detects installed OpenCode / Codex / Hermes and injects gateway config (backed up first, byte-exact restore on detach). Drift is detected and repaired automatically; multiple OpenCode instances supported |
+| 🌊 **Zero-buffer SSE** | Streaming responses are forwarded chunk by chunk — no aggregation, no added latency |
+| 🔒 **Encrypted backup** | Config + all keys exported as a password-encrypted `.aback` (Argon2id + AES-256-GCM) |
+| 🚀 **Autostart** | systemd user unit (Linux), LaunchAgent (macOS), Startup folder (Windows) — pure file operations |
+
+## Quick start
+
+1. **Download** the archive for your platform from [Releases](https://github.com/weifengchui/AgentBuffet/releases/latest) and extract it — you get a single `AgentBuffet` binary.
+
+   ```bash
+   tar xzf agentbuffet-linux-x86_64.tar.gz   # Windows: just unzip
+   ```
+
+2. **Start the gateway:**
+
+   ```bash
+   export DEEPSEEK_API_KEY=sk-...            # keys live only in the gateway's env
+   ./AgentBuffet serve
+   ```
+
+   The gateway listens on `http://127.0.0.1:3425` (traffic) and `http://127.0.0.1:3426` (console).
+   A `.env` file in your home directory is loaded automatically on start and hot reload.
+
+3. **Open the console** at `http://127.0.0.1:3426/`, add a provider (vendor → plan → paste key),
+   create a routing group, then flip the switch next to a detected agent. Done — your agents
+   are now eating from the buffet.
+
+Any OpenAI-compatible client can also be pointed at the gateway manually:
+
+```
+OPENAI_BASE_URL=http://127.0.0.1:3425/<agent-id>/v1
+OPENAI_API_KEY=agentbuffet
+```
+
+## How failover works
+
+Each request walks its routing chain in priority order:
+
+```
+agent ──▶ /<agent-id>/v1/chat/completions
+              │
+              ▼
+        [1] deepseek/deepseek-chat   429? → circuit breaker opens, cooldown
+              │ fail
+              ▼
+        [2] openrouter/deepseek-r1   401/403? → rotate to next API key first
+              │ fail
+              ▼
+        [3] moonshot/moonshot-v1-8k  timeout / first-chunk error → next hop
+```
+
+Every hop — success, retry, skip or breaker state — is recorded and shown per request
+in the console (routing chain column).
+
+## Configuration
+
+The console writes everything for you. For the impatient, `~/.agentbuffet/config.yaml`:
+
+<details>
+<summary>Full example</summary>
 
 ```yaml
 gateway:
@@ -40,14 +124,9 @@ routing_groups:
     members:
       - { provider: deepseek, model: deepseek-chat, priority: 1 }
       - { provider: moonshot, model: moonshot-v1-8k, priority: 2 }
-  - name: cheap
-    strategy: order
-    members:
-      - { provider: moonshot, model: moonshot-v1-8k, priority: 1 }
 agents:
   - { id: opencode, default_group: coding-flash }
-  - { id: codex, default_group: coding-flash }
-  - { id: hermes, default_group: cheap }
+  - { id: hermes, default_group: coding-flash }
 failover:
   max_retries: 3
   timeouts:
@@ -56,55 +135,49 @@ failover:
     stream_idle_seconds: 120
 ```
 
-3. 注入供应商 Key 并启动（Key 只存在于网关进程环境变量）：
+</details>
+
+Environment variables: `AGENTBUFFET_CONFIG` overrides the config path, `AGENTBUFFET_HOME`
+the data directory (usage logs, key env file).
+
+## CLI
+
+| Command | Description |
+|---|---|
+| `AgentBuffet [serve]` | Start the gateway (default subcommand) |
+| `AgentBuffet reload` | Hot-reload config (invalid config is rejected; the running snapshot keeps serving) |
+| `AgentBuffet agents detect\|status\|attach\|detach` | Agent attach manager |
+| `AgentBuffet service install\|uninstall\|status` | Autostart: systemd / LaunchAgent / Startup folder, pure file ops |
+| `AgentBuffet config export [--out PATH]` | Export current config (stdout by default) |
+| `AgentBuffet config import PATH` | Import a full config (validated; old file backed up as `.bak`) |
+
+## Security
+
+- Admin API and console bind to loopback only; non-loopback requests get `403`.
+- Real API keys exist only in the gateway process environment — never in logs,
+  the UI, config files or agent configs (placeholders + last-4 mask only).
+- `base_url` pointing at private/loopback IPs requires an explicit `allow_private: true` (fail-closed).
+- The attach writer only touches a whitelist of files, refuses to write on parse failure,
+  and always backs up first.
+- Nothing phones home: no telemetry, no external processes, model catalog fetches are plain HTTPS.
+
+## Build from source
 
 ```bash
-export DEEPSEEK_API_KEY=sk-...
-export MOONSHOT_API_KEY=sk-...
-AgentBuffet serve
+cargo build --release     # -> target/release/AgentBuffet
+cargo test                # unit + integration (mock providers, no network needed)
 ```
 
-4. 打开 `http://127.0.0.1:3426/` 查看 UI，对检测到的 Agent 拨一下开关即完成接入。
+Rust edition 2021. CI enforces `fmt --check`, `clippy -D warnings` and tests on
+Linux / macOS / Windows; pushing a `v*` tag builds five platform artifacts and publishes a Release.
 
-## 接入 Agent
+## Contributing
 
-```bash
-AgentBuffet agents detect          # 扫描已安装的 Agent 与接入状态
-AgentBuffet agents attach opencode # 注入配置（自动备份，幂等）
-AgentBuffet agents attach codex --dry-run
-AgentBuffet agents detach opencode # 还原（备份优先，逐字节）
-AgentBuffet agents status          # 漂移检查
-```
+Issues and PRs are welcome. For features, opening an issue first to discuss the
+scope is appreciated — this project deliberately stays a single dependency-light
+binary, so large new runtime dependencies are unlikely to be accepted.
+Please keep commits passing `cargo fmt`, `cargo clippy` and `cargo test`.
 
-未收录的 Agent（任意 OpenAI-compatible 客户端）用通用适配器：`attach` 会打印环境变量模板，设 `OPENAI_BASE_URL=http://127.0.0.1:3425/<agent-id>/v1`、`OPENAI_API_KEY=agentbuffet` 即可。
+## License
 
-## CLI 一览
-
-| 命令 | 说明 |
-| --- | --- |
-| `AgentBuffet [serve]` | 启动网关（默认子命令） |
-| `AgentBuffet reload` | 通知运行中的网关热重载配置（校验失败拒载，旧快照继续服务） |
-| `AgentBuffet agents detect\|status\|attach\|detach` | 接入器 |
-| `AgentBuffet service install\|uninstall\|status` | 开机自启：Linux 写 systemd 用户单元，macOS 写 LaunchAgent plist，Windows 写启动目录脚本（均为纯文件系统操作） |
-| `AgentBuffet config export [--out PATH]` | 导出当前配置（默认 stdout） |
-| `AgentBuffet config import PATH` | 导入整份配置（校验失败不落盘，原文件自动备份 .bak） |
-
-环境变量：`AGENTBUFFET_CONFIG` 覆盖配置文件路径，`AGENTBUFFET_HOME` 覆盖数据目录（用量日志、Key 环境文件）。
-
-## 安全边界
-
-- 管理面（`/_admin`、UI）仅监听 loopback；非 loopback 访问一律 403。
-- 真实 API Key 只存在于网关进程环境，不写入日志、UI、配置文件；Agent 配置里只有占位符。
-- 加密备份（`.aback`）：设置视图可将配置 + 全部 Key 打包，经 Argon2id + AES-256-GCM 密码加密后导出；导入自动校验并热重载，密码遗忘则无法恢复。
-- 开机自启与模型目录拉取均为纯文件系统 / HTTP 操作，不派生任何外部进程，维持单二进制零运行时依赖。
-- provider `base_url` 指向私有/回环 IP 必须显式 `allow_private: true`（fail-closed）。
-- 接入器只写白名单文件，解析失败拒绝写入，绝不"尽力而为"。
-
-## 构建
-
-```bash
-cargo build --release          # 产物 target/release/AgentBuffet
-cargo test                     # 单元 + 集成（含 mock provider，无外网依赖）
-```
-
-CI 覆盖 Linux / macOS / Windows 三平台的 `fmt --check`、`clippy -D warnings`、`test`；打 `v*` tag 自动构建六平台产物并发布 Release。
+[MIT](LICENSE) © 2026 weifengchui
