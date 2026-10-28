@@ -23,7 +23,8 @@ pub type Prices = HashMap<String, PriceEntry>;
 pub fn load_prices(path: &Path) -> (Prices, Option<String>) {
     // 历史兼容：默认路径迁移到 ~/.agentbuffet 后，旧版放在程序目录的 ./prices.yaml 仍兜底读取
     let legacy = std::path::Path::new("./prices.yaml");
-    let path = if !path.exists() && path == crate::config::default_prices_path() && legacy.exists() {
+    let path = if !path.exists() && path == crate::config::default_prices_path() && legacy.exists()
+    {
         legacy
     } else {
         path

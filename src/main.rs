@@ -120,7 +120,10 @@ async fn serve() {
     let env_file = agentbuffet::proxy::default_env_file();
     let loaded = agentbuffet::load_env_file(&env_file);
     if loaded > 0 && std::io::stderr().is_terminal() {
-        eprintln!("AgentBuffet: 已从 {} 载入 {loaded} 个环境变量", env_file.display());
+        eprintln!(
+            "AgentBuffet: 已从 {} 载入 {loaded} 个环境变量",
+            env_file.display()
+        );
     }
 
     let snap = load_snapshot();
@@ -182,7 +185,9 @@ async fn serve() {
     // 启动自动拉取：models 为空的服务商（如 OpenRouter）自动补齐模型目录
     {
         let st = state.clone();
-        tokio::spawn(async move { agentbuffet::auto_fetch_models(st).await; });
+        tokio::spawn(async move {
+            agentbuffet::auto_fetch_models(st).await;
+        });
     }
 
     let gateway_app = agentbuffet::build_router(state.clone());

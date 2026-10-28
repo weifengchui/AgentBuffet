@@ -99,7 +99,9 @@ mod imp {
     }
 
     fn xml_escape(s: &str) -> String {
-        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 
     fn plist_text(home: &Path) -> String {
@@ -108,7 +110,13 @@ mod imp {
                 .map(|x| x.display().to_string())
                 .unwrap_or_else(|_| "AgentBuffet".into()),
         );
-        let log = xml_escape(&home.join(".agentbuffet").join("launchd.log").display().to_string());
+        let log = xml_escape(
+            &home
+                .join(".agentbuffet")
+                .join("launchd.log")
+                .display()
+                .to_string(),
+        );
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

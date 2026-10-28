@@ -910,14 +910,22 @@ async fn provider_add(
         match fetch_models_list(&st, &plan.base_url, &env_name, Some(&api_keys[0])).await {
             Ok(pairs) => {
                 models = pairs.iter().map(|(m, _)| m.clone()).collect();
-                free = pairs.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
+                free = pairs
+                    .iter()
+                    .filter(|(_, f)| *f)
+                    .map(|(m, _)| m.clone())
+                    .collect();
             }
-            Err(_) => extra_warnings.push(
-                "模型列表拉取失败：可在服务商卡片点「拉取模型」重试".into(),
-            ),
+            Err(_) => {
+                extra_warnings.push("模型列表拉取失败：可在服务商卡片点「拉取模型」重试".into())
+            }
         }
     } else {
-        free = models.iter().filter(|m| free_rank(m) < 2).cloned().collect();
+        free = models
+            .iter()
+            .filter(|m| free_rank(m) < 2)
+            .cloned()
+            .collect();
     }
 
     let text = match std::fs::read_to_string(&path) {
@@ -960,7 +968,8 @@ async fn provider_add(
             item["api_key_env"] = serde_yaml::Value::String(env_name.clone());
             item["models"] = seq_of_strings(&models);
             if free.is_empty() {
-                item.as_mapping_mut().map(|m| m.remove(serde_yaml::Value::String("free_models".into())));
+                item.as_mapping_mut()
+                    .map(|m| m.remove(serde_yaml::Value::String("free_models".into())));
             } else {
                 item["free_models"] = seq_of_strings(&free);
             }
@@ -1348,7 +1357,11 @@ async fn set_provider_models(
             .find(|i| yaml_str(i, "id").as_deref() == Some(id.as_str()))
             .ok_or_else(|| format!("provider 不存在: {id}"))?;
         let mut models: Vec<String> = fetched.iter().map(|(m, _)| m.clone()).collect();
-        let mut free: Vec<String> = fetched.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
+        let mut free: Vec<String> = fetched
+            .iter()
+            .filter(|(_, f)| *f)
+            .map(|(m, _)| m.clone())
+            .collect();
         // 合并保留原声明模型（可能被路由组引用），避免替换后校验失败
         if let Some(cur) = item.get("models").and_then(|v| v.as_sequence()) {
             for c in cur.iter().filter_map(|v| v.as_str()) {
@@ -1365,7 +1378,8 @@ async fn set_provider_models(
         free.sort();
         item["models"] = seq_of_strings(&models);
         if free.is_empty() {
-            item.as_mapping_mut().map(|m| m.remove(serde_yaml::Value::String("free_models".into())));
+            item.as_mapping_mut()
+                .map(|m| m.remove(serde_yaml::Value::String("free_models".into())));
         } else {
             item["free_models"] = seq_of_strings(&free);
         }
