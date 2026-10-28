@@ -136,6 +136,58 @@ impl Adapter {
     }
 }
 
+/// Windows 侧探测 WSL 发行版里的主目录（纯文件系统扫描，不起外部进程）。
+///
+/// 很多用户把 Hermes / Codex / OpenCode 装在 WSL 里，配置位于
+/// `\\wsl.localhost\<发行版>\home\<用户>\.hermes\config.yaml`（旧系统为 `\\wsl$`）。
+#[cfg(windows)]
+fn wsl_homes() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    for root in ["\\\\wsl.localhost\\", "\\\\wsl$\\"] {
+        let Ok(rd) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for distro in rd.flatten() {
+            let dp = distro.path();
+            // root 用户：<发行版>/root/.hermes
+            v.push(dp.join("root"));
+            // 普通用户：<发行版>/home/<用户>/.hermes
+            if let Ok(users) = std::fs::read_dir(dp.join("home")) {
+                for u in users.flatten() {
+                    v.push(u.path());
+                }
+            }
+        }
+    }
+    v
+}
+
+#[cfg(not(windows))]
+fn wsl_homes() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// 解析该 Agent 实际所在的主目录：优先当前主目录，其次 Windows 侧的 WSL 发行版主目录。
+/// 找不到任何配置时回落到原主目录（保持原有报错文案与行为）。
+pub fn resolve_home(home: &Path, agent_id: &str, adapter: &str) -> PathBuf {
+    let a = Adapter::resolve(agent_id, adapter);
+    if a.config_path(home, agent_id)
+        .map(|p| p.exists())
+        .unwrap_or(false)
+    {
+        return home.to_path_buf();
+    }
+    for h in wsl_homes() {
+        if a.config_path(&h, agent_id)
+            .map(|p| p.exists())
+            .unwrap_or(false)
+        {
+            return h;
+        }
+    }
+    home.to_path_buf()
+}
+
 /// 已知可检测的本机 Agent（接入器视图快速接入）。
 pub const KNOWN_AGENTS: &[&str] = &["opencode", "codex", "hermes", "claude-code"];
 
@@ -176,6 +228,7 @@ const DRY_NOTE: &str = "dry-run：以下为将写入的变更预览，未落盘"
 /// 检测单个 agent 的适配器状态（只读）。
 pub fn detect(home: &Path, target: &Target) -> AgentStatus {
     let a = Adapter::resolve(&target.agent_id, &target.adapter);
+    let home = &resolve_home(home, &target.agent_id, &target.adapter);
     let path = a.config_path(home, &target.agent_id);
     let cp = path.as_ref().map(|p| p.display().to_string());
     let mut s = AgentStatus {
@@ -257,6 +310,7 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
 
 /// dry-run：输出将修改的文件与 diff 预览，不落盘（§7 plan）。
 pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
+    let home = &resolve_home(home, &target.agent_id, &target.adapter);
     let a = Adapter::resolve(&target.agent_id, &target.adapter);
     match a {
         Adapter::Generic => Ok(generic_result(
@@ -288,6 +342,7 @@ pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
 
 /// 实际写入：备份 → 注入（幂等）。
 pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
+    let home = &resolve_home(home, &target.agent_id, &target.adapter);
     let a = Adapter::resolve(&target.agent_id, &target.adapter);
     match a {
         Adapter::Generic => Ok(generic_result(target, APPLIED_NOTE)),
@@ -1054,6 +1109,14 @@ mod tests {
         assert!(d.contains("- b"));
         assert!(d.contains("+ X"));
         assert_eq!(line_preview("same\n", "same\n"), "(无变更)");
+    }
+
+    #[test]
+    fn resolve_home_falls_back_to_base() {
+        // 临时主目录里没有 Hermes 配置，且 Linux 下无 WSL 候选 → 原样返回
+        let dir = std::env::temp_dir().join("ab-resolve-home-test");
+        let _ = std::fs::create_dir_all(&dir);
+        assert_eq!(resolve_home(&dir, "hermes", ""), dir);
     }
 
     #[test]
