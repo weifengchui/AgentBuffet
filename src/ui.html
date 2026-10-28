@@ -460,7 +460,10 @@ function toggleLang() {
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || (j.details ? j.details.join("; ") : "HTTP " + r.status));
+  if (!r.ok) {
+    const d = Array.isArray(j.details) ? j.details.join("; ") : "";
+    throw new Error((j.error || "HTTP " + r.status) + (d ? ": " + d : ""));
+  }
   return j;
 }
 const post = (path, body) => api(path, {

@@ -2004,7 +2004,12 @@ async fn import_enc(
     };
     let plain = match securebox::unseal(&body.password, &blob) {
         Ok(p) => p,
-        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, e),
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "解密失败：密码错误，或备份文件不完整/已损坏".into(),
+            )
+        }
     };
     let val: serde_json::Value = match serde_json::from_slice(&plain) {
         Ok(v) => v,
@@ -2024,7 +2029,16 @@ async fn import_enc(
         );
     }
     let bak = PathBuf::from(format!("{}.bak", path.display()));
-    if !bak.exists() {
+    if let Some(dir) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("创建目录 {} 失败: {e}", dir.display()),
+            );
+        }
+    }
+    // 首次运行（尚无 config.yaml）时没有旧文件可备份，直接写入即可
+    if !bak.exists() && path.exists() {
         if let Err(e) = std::fs::copy(&path, &bak) {
             return err(StatusCode::UNPROCESSABLE_ENTITY, format!("备份失败: {e}"));
         }
