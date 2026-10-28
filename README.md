@@ -63,6 +63,8 @@ No database. No sidecar processes. No C runtime. One binary, done.
 
    The gateway listens on `http://127.0.0.1:3425` (traffic) and `http://127.0.0.1:3426` (console).
    A `.env` file in your home directory is loaded automatically on start and hot reload.
+   On first run (no `~/.agentbuffet/config.yaml`), a minimal default config is generated
+   automatically — Windows 上直接双击 `AgentBuffet.exe` 也能正常常驻启动。
 
 3. **Open the console** at `http://127.0.0.1:3426/`, add a provider (vendor → plan → paste key),
    create a routing group, then flip the switch next to a detected agent. Done — your agents

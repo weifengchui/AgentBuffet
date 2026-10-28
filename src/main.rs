@@ -30,6 +30,37 @@ fn load_snapshot() -> agentbuffet::config::Snapshot {
     let path = default_config_path();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // 首次运行（如 Windows 双击 exe）：自动生成最小默认配置并继续启动，
+            // 避免控制台窗口一闪即退、页面打不开。
+            const STARTER: &str = "\
+# AgentBuffet 首次运行自动生成的默认配置。
+# 浏览器打开控制台 http://127.0.0.1:3426 添加服务商 / 路由组 / Agent，保存后热重载即时生效。
+gateway:
+  addr: \"127.0.0.1:3425\"
+  ui_addr: \"127.0.0.1:3426\"
+providers: []
+routing_groups: []
+agents: []
+";
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            match std::fs::write(&path, STARTER) {
+                Ok(()) => {
+                    eprintln!("AgentBuffet: 首次运行，已生成默认配置 {}", path.display());
+                    eprintln!("AgentBuffet: 请在浏览器打开控制台 http://127.0.0.1:3426 添加服务商");
+                }
+                Err(e2) => {
+                    eprintln!(
+                        "AgentBuffet: 配置 {} 不存在且无法自动生成默认配置: {e2}",
+                        path.display()
+                    );
+                    std::process::exit(1);
+                }
+            }
+            STARTER.to_string()
+        }
         Err(e) => {
             eprintln!("AgentBuffet: 读取配置失败 {}: {e}", path.display());
             std::process::exit(1);
