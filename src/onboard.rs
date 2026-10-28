@@ -143,16 +143,21 @@ impl Adapter {
 #[cfg(windows)]
 fn wsl_homes() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    for root in ["\\\\wsl.localhost\\", "\\\\wsl$\\"] {
-        let Ok(rd) = std::fs::read_dir(root) else {
-            continue;
-        };
-        for distro in rd.flatten() {
-            let dp = distro.path();
+    // `\\wsl.localhost\` 根目录无法枚举（FindFirstFile 返回空），发行版名还会因大小写
+    // 敏感而失配（ubuntu-24.04 打不开，Ubuntu-24.04 才行）→ 从注册表取真实发行版名。
+    for name in wsl_distro_names() {
+        for base in [
+            format!("\\\\wsl.localhost\\{name}"),
+            format!("\\\\wsl$\\{name}"),
+        ] {
+            let root = PathBuf::from(&base);
+            if !root.is_dir() {
+                continue;
+            }
             // root 用户：<发行版>/root/.hermes
-            v.push(dp.join("root"));
+            v.push(root.join("root"));
             // 普通用户：<发行版>/home/<用户>/.hermes
-            if let Ok(users) = std::fs::read_dir(dp.join("home")) {
+            if let Ok(users) = std::fs::read_dir(root.join("home")) {
                 for u in users.flatten() {
                     v.push(u.path());
                 }
@@ -160,6 +165,29 @@ fn wsl_homes() -> Vec<PathBuf> {
         }
     }
     v
+}
+
+/// 注册表 `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss` 下各发行版的 DistributionName。
+#[cfg(windows)]
+fn wsl_distro_names() -> Vec<String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let mut out = Vec::new();
+    let Ok(lxss) = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Lxss")
+    else {
+        return out;
+    };
+    for key in lxss.enum_keys().flatten() {
+        if let Ok(sub) = lxss.open_subkey(&key) {
+            if let Ok(name) = sub.get_value::<String, _>("DistributionName") {
+                if !name.is_empty() {
+                    out.push(name);
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(not(windows))]

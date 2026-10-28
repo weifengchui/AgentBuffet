@@ -1,6 +1,6 @@
 [package]
 name = "AgentBuffet"
-version = "0.2.15"
+version = "0.2.16"
 edition = "2021"
 license = "MIT"
 description = "AgentBuffet（Agent食堂）—— 极低功耗 AI 模型 API 网关"
@@ -20,6 +20,10 @@ aes-gcm = "0.10"
 argon2 = "0.5"
 getrandom = "0.2"
 base64 = "0.22"
+
+# Windows 专用：读取注册表枚举 WSL 发行版（纯 Rust，无 C 依赖）。
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
