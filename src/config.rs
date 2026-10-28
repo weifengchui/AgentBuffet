@@ -186,7 +186,15 @@ fn d_ratio() -> f64 {
     0.8
 }
 fn d_prices() -> PathBuf {
-    PathBuf::from("./prices.yaml")
+    default_prices_path()
+}
+
+/// 单价文件默认路径：`~/.agentbuffet/prices.yaml`（Windows 为
+/// `C:\Users\<用户名>\.agentbuffet\prices.yaml`），与 exe 目录解耦，升级不丢。
+pub fn default_prices_path() -> PathBuf {
+    crate::onboard::home_dir_opt()
+        .map(|h| h.join(".agentbuffet").join("prices.yaml"))
+        .unwrap_or_else(|| PathBuf::from("./prices.yaml"))
 }
 fn d_order() -> String {
     "order".into()

@@ -1,6 +1,6 @@
 [package]
 name = "AgentBuffet"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2021"
 license = "MIT"
 description = "AgentBuffet（Agent食堂）—— 极低功耗 AI 模型 API 网关"

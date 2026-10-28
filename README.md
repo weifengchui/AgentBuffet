@@ -65,6 +65,9 @@ No database. No sidecar processes. No C runtime. One binary, done.
    A `.env` file in your home directory is loaded automatically on start and hot reload.
    On first run (no `~/.agentbuffet/config.yaml`), a minimal default config is generated
    automatically — Windows 上直接双击 `AgentBuffet.exe` 也能正常常驻启动。
+   All persistent state (config / keys / logs / prices) lives in `~/.agentbuffet`
+   (Windows: `C:\Users\<用户名>\.agentbuffet`), never in the exe directory — upgrading
+   is just replacing the binary; 配置不会被覆盖。
 
 3. **Open the console** at `http://127.0.0.1:3426/`, add a provider (vendor → plan → paste key),
    create a routing group, then flip the switch next to a detected agent. Done — your agents

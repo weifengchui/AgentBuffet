@@ -21,6 +21,12 @@ pub type Prices = HashMap<String, PriceEntry>;
 /// 读取 prices.yaml（model → {input, output}）。
 /// 失败仅告警不拒启：返回空表 + 告警文案，此后 cost_est 一律 null。
 pub fn load_prices(path: &Path) -> (Prices, Option<String>) {
+    // 历史兼容：默认路径迁移到 ~/.agentbuffet 后，旧版放在程序目录的 ./prices.yaml 仍兜底读取
+    let path = if !path.exists() && path == crate::config::default_prices_path() {
+        std::path::Path::new("./prices.yaml")
+    } else {
+        path
+    };
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {

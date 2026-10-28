@@ -20,12 +20,23 @@ const CX_TABLE_END: &str = "# <<< agentbuffet:end";
 const CX_DEF_BEGIN: &str = "# >>> agentbuffet:defaults:begin";
 const CX_DEF_END: &str = "# <<< agentbuffet:defaults:end";
 
+/// 用户主目录：Windows 优先 USERPROFILE，Unix 优先 HOME；两者皆缺失返回 None
+/// （调用方据此拒绝把配置写进程序/exe 目录，避免升级覆盖）。
+pub fn home_dir_opt() -> Option<PathBuf> {
+    let (first, second) = if cfg!(windows) {
+        ("USERPROFILE", "HOME")
+    } else {
+        ("HOME", "USERPROFILE")
+    };
+    std::env::var_os(first)
+        .or_else(|| std::env::var_os(second))
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
 /// 用户主目录（适配器配置文件所在）。
 pub fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
+    home_dir_opt().unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// 注入目标：由网关配置快照构造。

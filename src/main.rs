@@ -13,10 +13,13 @@ fn agentbuffet_home() -> PathBuf {
     if let Ok(h) = std::env::var("AGENTBUFFET_HOME") {
         return PathBuf::from(h);
     }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".agentbuffet")
+    match onboard::home_dir_opt() {
+        Some(h) => h.join(".agentbuffet"),
+        None => {
+            eprintln!("AgentBuffet: 无法定位用户主目录（HOME/USERPROFILE 均未设置），拒绝将配置写入程序目录。");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn default_config_path() -> PathBuf {
