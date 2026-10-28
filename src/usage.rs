@@ -22,13 +22,16 @@ pub type Prices = HashMap<String, PriceEntry>;
 /// 失败仅告警不拒启：返回空表 + 告警文案，此后 cost_est 一律 null。
 pub fn load_prices(path: &Path) -> (Prices, Option<String>) {
     // 历史兼容：默认路径迁移到 ~/.agentbuffet 后，旧版放在程序目录的 ./prices.yaml 仍兜底读取
-    let path = if !path.exists() && path == crate::config::default_prices_path() {
-        std::path::Path::new("./prices.yaml")
+    let legacy = std::path::Path::new("./prices.yaml");
+    let path = if !path.exists() && path == crate::config::default_prices_path() && legacy.exists() {
+        legacy
     } else {
         path
     };
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
+        // 单价表是可选文件：不存在属正常（cost_est 记 null），不算告警
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Prices::new(), None),
         Err(e) => {
             return (
                 Prices::new(),

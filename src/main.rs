@@ -115,6 +115,14 @@ async fn main() {
 }
 
 async fn serve() {
+    // env 文件（~/.agentbuffet/env）必须在快照校验之前载入：
+    // startup_warnings 依赖环境变量判断 provider 是否 degraded，先告警后载入会误报。
+    let env_file = agentbuffet::proxy::default_env_file();
+    let loaded = agentbuffet::load_env_file(&env_file);
+    if loaded > 0 && std::io::stderr().is_terminal() {
+        eprintln!("AgentBuffet: 已从 {} 载入 {loaded} 个环境变量", env_file.display());
+    }
+
     let snap = load_snapshot();
 
     if std::io::stderr().is_terminal() {
@@ -125,14 +133,6 @@ async fn serve() {
 
     let logs_dir = agentbuffet_home().join("logs");
     let state = Arc::new(AppState::with_paths(snap, default_config_path(), logs_dir));
-    // env 文件（~/.agentbuffet/env）自动载入进程环境：Key 只需写文件，无需启动方 source
-    let loaded = agentbuffet::load_env_file(&state.env_file);
-    if loaded > 0 {
-        eprintln!(
-            "AgentBuffet: 已从 {} 载入 {loaded} 个环境变量",
-            state.env_file.display()
-        );
-    }
     let listen = state.snap.read().await.gateway_addr;
     let ui = state.snap.read().await.ui_addr;
 
