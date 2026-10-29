@@ -39,7 +39,7 @@
 | 🔀 **自动故障转移** | 按优先级走路由链；滑动窗口熔断、额度软上限、429 被动校准、首 chunk 错误即时切换 |
 | 🔑 **多 Key 轮转** | 同一服务商可挂多个 API Key，请求轮转分摊；401/403 先换 Key 重试，全部失败才转移服务商 |
 | 🖥️ **表单化控制台** | 中英双语 Web UI：选厂商 → 选套餐 → 贴 Key 即添加服务商；拖拽排序、免费模型标识、热重载即时生效，无需手写 YAML |
-| 🔌 **接入器一键托管** | 自动检测本机 OpenCode / Codex / Hermes 并注入网关配置（写前备份，卸载逐字节还原）；配置漂移自动检测、全自动修复；支持 OpenCode 多实例独立路由 |
+| 🔌 **接入器一键托管** | 自动检测**各运行环境**（本机 / WSL 发行版 / Windows 侧）的 OpenCode / Codex / Hermes 并注入网关配置（写前备份，卸载逐字节还原）；同名 Agent 在不同环境独立成实例、配置互不覆盖、用量分开统计；配置漂移自动检测、全自动修复；支持 OpenCode 多实例独立路由 |
 | 🌊 **零缓冲 SSE** | 流式响应逐 chunk 透传，不聚合、不增加延迟 |
 | 🔒 **加密备份** | 配置 + 全部 Key 经 Argon2id + AES-256-GCM 密码加密导出为 `.aback` |
 | 🚀 **开机自启** | Linux systemd 用户单元 / macOS LaunchAgent / Windows 启动目录，均为纯文件系统操作 |
@@ -153,7 +153,22 @@ failover:
 - 真实 API Key 仅持久化在本机 `~/.agentbuffet/env` 文件（权限 0600，仅属主可读写），由网关载入进程环境；`config.yaml`、日志、UI 与 Agent 配置中只有变量名、占位符与末四位掩码。密码加密的 `.aback` 备份按设计包含密钥；任何密钥都不出本机。
 - `base_url` 指向私有/回环 IP 必须显式 `allow_private: true`（fail-closed）。
 - 接入器只写白名单文件，解析失败拒绝写入，绝不"尽力而为"，写前必备份。
+- **AgentBuffet 的注入是最高优先级**：接入会原地接管 Agent 工具自己的配置键
+  （如 Codex 的顶层 `model_provider` / `model`），而不是绕开它另设一套——否则
+  "已接入"只是摆设，工具仍在用它原来的服务商。被外部改回时，30s 巡检会自动
+  抢回；`detach` 可从备份逐字节还原你原来的设置。
+- 巡检覆盖**已登记进网关配置**的实例（含 `hermes@wsl:Ubuntu` 这类多环境实例——
+  接入时会自动补登记）。没接入过的实例不会被自动改写：巡检只写"配置里点名的
+  agent 所在环境"的文件，不会因为扫到别的环境就去动你真实的配置。
 - 零上报：无遥测、不派生外部进程，模型目录拉取只是普通 HTTPS 请求。
+
+### 环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `AGENTBUFFET_CONFIG` | 网关配置文件路径（默认 `~/.agentbuffet/config.yaml`） |
+| `AGENTBUFFET_HOME` | AgentBuffet 自身数据目录（默认 `~/.agentbuffet`） |
+| `AGENTBUFFET_AGENT_HOME` | **仅供测试/隔离实例**：把接入器读写的 Agent 本地配置重定向到该目录，并停止枚举 WSL / Windows 侧的真实用户目录。`AGENTBUFFET_CONFIG` 只隔离网关配置，不隔离 Agent 自己的配置文件——不设这个开关，测试实例的 `attach` 会直接改写你真实的 `~/.codex/config.toml` 之类文件 |
 
 ## 从源码构建
 

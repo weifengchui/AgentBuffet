@@ -15,6 +15,9 @@ use tower::ServiceExt;
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
 fn temp_dir(tag: &str) -> PathBuf {
+    // 隔离：scope 枚举不再包含 WSL / Windows 侧的真实用户目录，测试既不会
+    // 改写用户真实配置，也不会读到它们。
+    agentbuffet::onboard::enable_isolation_for_tests();
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let d = std::env::temp_dir().join(format!("buffet-crud-{tag}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -411,15 +414,19 @@ async fn agents_detect_finds_installed() {
     std::fs::write(dir.join(".codex").join("config.toml"), "model = \"gpt\"\n").unwrap();
     let (code, j) = call_get(st.clone(), "/api/agents/detect").await;
     assert_eq!(code, StatusCode::OK);
-    let arr = j.as_array().unwrap();
-    assert_eq!(arr.len(), 4);
-    let hm = arr.iter().find(|x| x["agent_id"] == "hermes").unwrap();
-    assert_eq!(hm["adapter"], "hermes");
-    let codex = arr.iter().find(|x| x["agent_id"] == "codex").unwrap();
+    // detect 返回 {scopes: [...], agents: [...]}：按运行环境分组 + 扁平列表
+    let agents = j["agents"].as_array().unwrap();
+    let scopes = j["scopes"].as_array().unwrap();
+    assert!(!scopes.is_empty(), "至少应含本机环境分组");
+    assert_eq!(scopes[0]["kind"], "native");
+    assert_eq!(scopes[0]["id"], "native");
+
+    let codex = agents.iter().find(|x| x["agent_id"] == "codex").unwrap();
     assert_eq!(codex["installed"], true);
     assert_eq!(codex["in_config"], false);
-    let oc = arr.iter().find(|x| x["agent_id"] == "opencode").unwrap();
-    assert_eq!(oc["installed"], false);
-    let cc = arr.iter().find(|x| x["agent_id"] == "claude-code").unwrap();
-    assert_eq!(cc["adapter"], "claude-code");
+    assert_eq!(codex["scope_id"], "native");
+    // 未安装的 Agent 不进 detect 结果（与旧行为一致：只列装了的）
+    assert!(agents.iter().all(|x| x["agent_id"] != "opencode"));
+    assert!(agents.iter().all(|x| x["agent_id"] != "hermes"));
+    assert!(agents.iter().all(|x| x["agent_id"] != "claude-code"));
 }

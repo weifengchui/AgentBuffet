@@ -86,12 +86,17 @@ fn usage(code: i32) -> ! {
     eprintln!(
         "用法: AgentBuffet [serve]                     启动网关（默认）\n\
         \x20     AgentBuffet reload                     通知运行中的网关热重载配置\n\
-        \x20     AgentBuffet agents detect|status       列出全部 agent 接入状态\n\
+        \x20     AgentBuffet agents detect|status       按运行环境列出全部 agent 接入状态\n\
         \x20     AgentBuffet agents attach <id> [--group g] [--dry-run]\n\
         \x20     AgentBuffet agents detach <id>         还原（备份优先，逐字节）\n\
         \x20     AgentBuffet service install|uninstall|status  开机自启（systemd 用户单元 / macOS LaunchAgent / Windows 启动目录）\n\
         \x20     AgentBuffet config export [--out PATH]   导出当前配置（默认 stdout）\n\
-        \x20     AgentBuffet config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）"
+        \x20     AgentBuffet config import PATH           导入整份配置（校验失败不落盘，原文件备份 .bak）\n\n\
+        多环境实例 id：<agent>@<scope>，scope 取自 agents detect 的分组\n\
+        \x20   本机          → hermes\n\
+        \x20   WSL 发行版    → hermes@wsl:Ubuntu\n\
+        \x20   Windows 侧    → hermes@win:<user>\n\
+        同名 Agent 在不同环境是**独立实例**：配置各写各的，用量分开统计。"
     );
     std::process::exit(code);
 }
@@ -249,6 +254,40 @@ fn agents_cmd(args: &[String]) {
     let home = onboard::home_dir();
     match sub {
         "detect" | "status" => {
+            // detect：扫描各运行环境（本机 / WSL 发行版 / Windows 侧）下已安装的 Agent
+            let detected = onboard::detect_all(&home, &snap);
+            if sub == "detect" {
+                if detected.is_empty() {
+                    println!("未检测到任何已安装的 Agent");
+                    return;
+                }
+                let scopes = agentbuffet::scope::enumerate_cached(&home);
+                for sc in &scopes {
+                    let items: Vec<&onboard::DetectedAgent> =
+                        detected.iter().filter(|a| a.scope_id == sc.id).collect();
+                    if items.is_empty() {
+                        continue;
+                    }
+                    println!("── {} ({})", sc.label(), sc.id);
+                    for a in items {
+                        let st = if a.attached {
+                            if a.drifted {
+                                "已接入(漂移)"
+                            } else {
+                                "已接入"
+                            }
+                        } else {
+                            "未接入"
+                        };
+                        println!(
+                            "  {:<22} {:<12} {:<10} {}",
+                            a.agent_id, a.adapter, st, a.note
+                        );
+                    }
+                }
+                return;
+            }
+            // status：列出配置里的 agent 及其所在环境
             let targets = agentbuffet::agent_targets(&snap);
             let list = onboard::status_all(&home, &targets);
             if list.is_empty() {
@@ -265,7 +304,10 @@ fn agents_cmd(args: &[String]) {
                 } else {
                     "未接入"
                 };
-                println!("{:<14} {:<12} {:<10} {}", a.agent_id, a.adapter, st, a.note);
+                println!(
+                    "{:<22} {:<14} {:<12} {:<10} {}",
+                    a.agent_id, a.scope_label, a.adapter, st, a.note
+                );
             }
         }
         "attach" => {
@@ -292,15 +334,26 @@ fn agents_cmd(args: &[String]) {
                     }
                 }
             }
-            let Some(a) = snap.agents.get(id) else {
-                eprintln!("配置中不存在 agent: {id}");
+            // 多环境实例（hermes@wsl:Ubuntu / hermes@win:yxf）可能还没在配置里：
+            // 允许直接 attach，自动补一条 agent 配置（默认组取 --group 或第一个组）。
+            let existing = snap.agents.get(id);
+            let g = group
+                .or_else(|| existing.map(|a| a.default_group.clone()))
+                .or_else(|| {
+                    let mut names: Vec<&String> = snap.groups.keys().collect();
+                    names.sort();
+                    names.first().map(|s| (*s).clone())
+                })
+                .unwrap_or_default();
+            if g.is_empty() {
+                eprintln!("配置中无可用路由组，请先创建路由组或用 --group 指定");
                 std::process::exit(1);
-            };
-            let g = group.unwrap_or_else(|| a.default_group.clone());
+            }
             if !snap.groups.contains_key(&g) {
                 eprintln!("路由组不存在: {g}");
                 std::process::exit(1);
             }
+            let adapter = existing.map(|a| a.adapter.clone()).unwrap_or_default();
             let mut names: Vec<&String> = snap.groups.keys().collect();
             names.sort();
             let target = onboard::Target {
@@ -309,7 +362,7 @@ fn agents_cmd(args: &[String]) {
                 groups: names.into_iter().cloned().collect(),
                 models: agentbuffet::routable_models(&snap, &g),
                 gateway_addr: snap.gateway_addr.to_string(),
-                adapter: a.adapter.clone(),
+                adapter: adapter.clone(),
             };
             let res = if dry {
                 onboard::plan(&home, &target)
@@ -317,7 +370,19 @@ fn agents_cmd(args: &[String]) {
                 onboard::apply(&home, &target)
             };
             match res {
-                Ok(r) => print_apply_result(&r),
+                Ok(r) => {
+                    // 未在配置里的实例：写完配置后再补一条 agent 记录，
+                    // 让网关侧的路径前缀 /<agent-id>/v1 能对上。
+                    if existing.is_none() && !dry {
+                        let ad = if adapter.is_empty() { "" } else { &adapter };
+                        if let Err(e) =
+                            agentbuffet::config::upsert_agent(&default_config_path(), id, &g, ad)
+                        {
+                            eprintln!("已写入工具配置，但补写 agent 配置失败: {e}");
+                        }
+                    }
+                    print_apply_result(&r)
+                }
                 Err(e) => {
                     eprintln!("接入失败: {e}");
                     std::process::exit(1);

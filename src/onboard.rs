@@ -6,7 +6,10 @@
 //! - 幂等：重复 attach 只更新注入块，不叠加；同名 provider 被用户自定义过 → 拒绝。
 //! - 永不写入真实 API Key：apiKey 一律填占位符，真实 Key 只存在于网关进程环境变量。
 //! - 运行期只读做漂移检测，永不主动写——改写只发生在显式 CLI/UI 操作（本模块由调用方触发）。
+//! - 多环境隔离（参照 Magpie）：agent id 带 `@scope` 后缀即表示某个运行环境里的实例
+//!   （`hermes` = 本机，`hermes@wsl:Ubuntu` = WSL 发行版），配置各写各的，互不覆盖。
 
+use crate::scope;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -34,8 +37,54 @@ pub fn home_dir_opt() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// 隔离实例的主目录覆盖环境变量。
+///
+/// **测试与验证实例必须设置它**：`AGENTBUFFET_CONFIG` 只隔离网关自己的配置，
+/// 不隔离 Agent 工具的本地配置（`~/.codex/config.toml`、`~/.hermes/config.yaml`、
+/// WSL 里的对应文件）。不设的话，隔离实例的 attach 会直接改写用户真实配置——
+/// 端口号也会跟着写错，表现为"接入后一直漂移"。
+pub const ENV_AGENT_HOME: &str = "AGENTBUFFET_AGENT_HOME";
+
+/// 进程内隔离模式的主目录（测试用）。
+///
+/// 用 `OnceLock` 而不是环境变量：Rust 测试默认多线程并行，环境变量的
+/// set/读跨线程没有同步保证——曾因此让测试在隔离开关"还没生效"的窗口里
+/// 枚举到真实 WSL scope，并把测试端口写进了用户真实的配置。
+static ISOLATED_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// 当前是否处于隔离模式（接入器主目录被覆盖）。
+pub fn agent_home_isolated() -> bool {
+    ISOLATED_HOME.get().is_some() || std::env::var_os(ENV_AGENT_HOME).is_some_and(|v| !v.is_empty())
+}
+
+/// 进程级一次性开启隔离模式（测试专用）。
+///
+/// 开启后：scope 枚举不再包含 WSL / Windows 侧的真实用户目录，`home_dir()` 指向
+/// 一个临时目录。测试进程因此既不会改写用户真实配置，也不会读到它们——
+///
+/// 没有这层隔离时，测试里对 `hermes@wsl:Ubuntu` 调 `apply` 会**直接写入用户
+/// 真实的 WSL 配置**（scope 枚举读的是注册表，与传入的 home 无关）。
+///
+/// 进程内全局生效（`OnceLock`，无跨线程竞态）；测试可并行调用。
+pub fn enable_isolation_for_tests() {
+    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    ONCE.get_or_init(|| {
+        let dir = std::env::temp_dir().join("agentbuffet-isolated-home");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = ISOLATED_HOME.set(dir);
+    });
+}
+
 /// 用户主目录（适配器配置文件所在）。
 pub fn home_dir() -> PathBuf {
+    if let Some(d) = ISOLATED_HOME.get() {
+        return d.clone();
+    }
+    if let Some(v) = std::env::var_os(ENV_AGENT_HOME) {
+        if !v.is_empty() {
+            return PathBuf::from(v);
+        }
+    }
     home_dir_opt().unwrap_or_else(|| PathBuf::from("."))
 }
 
@@ -56,8 +105,13 @@ pub struct Target {
 }
 
 impl Target {
+    /// 注入到 Agent 配置里的网关地址。
+    ///
+    /// 路径前缀承载 agent id（`/<agent-id>/v1`），因此 WSL 里的实例与本机实例
+    /// 在网关侧天然分开统计；WSL 里访问网关的主机地址按其网络模式修正。
     pub fn base_url(&self) -> String {
-        format!("http://{}/{}/v1", self.gateway_addr, self.agent_id)
+        let addr = scope::gateway_addr_for(&self.agent_id, &self.gateway_addr, &home_dir());
+        format!("http://{}/{}/v1", addr, self.agent_id)
     }
     pub fn model_pointer(&self) -> String {
         format!("{PROVIDER_NAME}/group/{}", self.default_group)
@@ -86,6 +140,7 @@ impl Adapter {
 
     /// agent id → 适配器。已知名字用专属适配器，其余走通用（只打印模板）。
     /// 优先按显式提示解析适配器，支持多实例（如 opencode-work 复用 OpenCode 适配器）。
+    /// id 里的 `@scope` 后缀（多环境实例）不影响适配器选择。
     pub fn resolve(agent_id: &str, hint: &str) -> Adapter {
         match hint {
             "opencode" => Adapter::OpenCode,
@@ -98,7 +153,7 @@ impl Adapter {
     }
 
     pub fn for_agent(agent_id: &str) -> Adapter {
-        match agent_id {
+        match scope::kind_of(agent_id) {
             "opencode" => Adapter::OpenCode,
             "codex" => Adapter::Codex,
             "hermes" => Adapter::Hermes,
@@ -111,20 +166,25 @@ impl Adapter {
     pub fn config_path(self, home: &Path, agent_id: &str) -> Option<PathBuf> {
         match self {
             Adapter::OpenCode => {
-                let fname = if agent_id == "opencode" {
-                    "opencode.json".to_string()
-                } else {
-                    let safe: String = agent_id
-                        .chars()
-                        .map(|c| {
-                            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
-                                c
-                            } else {
-                                '-'
-                            }
-                        })
-                        .collect();
-                    format!("{safe}.json")
+                // 多实例：每个实例一个配置文件；环境（scope）不进文件名——
+                // 不同环境的主目录本就不同，同名文件不会撞车。
+                let fname = {
+                    let base = scope::kind_of(agent_id);
+                    if base == "opencode" {
+                        "opencode.json".to_string()
+                    } else {
+                        let safe: String = base
+                            .chars()
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                                    c
+                                } else {
+                                    '-'
+                                }
+                            })
+                            .collect();
+                        format!("{safe}.json")
+                    }
                 };
                 Some(home.join(".config").join("opencode").join(fname))
             }
@@ -136,84 +196,36 @@ impl Adapter {
     }
 }
 
-/// Windows 侧探测 WSL 发行版里的主目录（纯文件系统扫描，不起外部进程）。
+/// 解析该 Agent 实际所在的主目录。
 ///
-/// 很多用户把 Hermes / Codex / OpenCode 装在 WSL 里，配置位于
-/// `\\wsl.localhost\<发行版>\home\<用户>\.hermes\config.yaml`（旧系统为 `\\wsl$`）。
-#[cfg(windows)]
-fn wsl_homes() -> Vec<PathBuf> {
-    let mut v = Vec::new();
-    // `\\wsl.localhost\` 根目录无法枚举（FindFirstFile 返回空），发行版名还会因大小写
-    // 敏感而失配（ubuntu-24.04 打不开，Ubuntu-24.04 才行）→ 从注册表取真实发行版名。
-    for name in wsl_distro_names() {
-        for base in [
-            format!("\\\\wsl.localhost\\{name}"),
-            format!("\\\\wsl$\\{name}"),
-        ] {
-            let root = PathBuf::from(&base);
-            if !root.is_dir() {
-                continue;
-            }
-            // root 用户：<发行版>/root/.hermes
-            v.push(root.join("root"));
-            // 普通用户：<发行版>/home/<用户>/.hermes
-            if let Ok(users) = std::fs::read_dir(root.join("home")) {
-                for u in users.flatten() {
-                    v.push(u.path());
-                }
-            }
-        }
-    }
-    v
-}
-
-/// 注册表 `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss` 下各发行版的 DistributionName。
-#[cfg(windows)]
-fn wsl_distro_names() -> Vec<String> {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
-    let mut out = Vec::new();
-    let Ok(lxss) = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Lxss")
-    else {
-        return out;
-    };
-    for key in lxss.enum_keys().flatten() {
-        if let Ok(sub) = lxss.open_subkey(&key) {
-            if let Ok(name) = sub.get_value::<String, _>("DistributionName") {
-                if !name.is_empty() {
-                    out.push(name);
-                }
-            }
-        }
-    }
-    out
-}
-
-#[cfg(not(windows))]
-fn wsl_homes() -> Vec<PathBuf> {
-    Vec::new()
-}
-
-/// 解析该 Agent 实际所在的主目录：优先当前主目录，其次 Windows 侧的 WSL 发行版主目录。
-/// 找不到任何配置时回落到原主目录（保持原有报错文案与行为）。
+/// - id 带 `@scope` 后缀（多环境实例，如 `hermes@wsl:Ubuntu`）→ 该环境的主目录，
+///   与本机实例各写各的，互不覆盖。
+/// - 本机实例 → 本机主目录。**不再回落到 WSL**：回落会把两套环境混成一套，
+///   这正是多环境隔离要消灭的问题（WSL 里的实例请用 `hermes@wsl:<发行版>` 接入）。
 pub fn resolve_home(home: &Path, agent_id: &str, adapter: &str) -> PathBuf {
-    let a = Adapter::resolve(agent_id, adapter);
-    if a.config_path(home, agent_id)
-        .map(|p| p.exists())
-        .unwrap_or(false)
-    {
-        return home.to_path_buf();
+    let _ = adapter;
+    match scope::scope_of(agent_id) {
+        scope::NATIVE => home.to_path_buf(),
+        sid => scope::home_for_scope(sid, home).unwrap_or_else(|| home.to_path_buf()),
     }
-    for h in wsl_homes() {
-        if a.config_path(&h, agent_id)
-            .map(|p| p.exists())
-            .unwrap_or(false)
-        {
-            return h;
-        }
+}
+
+/// 同上，但环境不存在（发行版已停止/卸载）时报错——写操作绝不能落到别的环境去。
+fn scope_home(home: &Path, agent_id: &str) -> Result<PathBuf, String> {
+    let sid = scope::scope_of(agent_id);
+    if sid == scope::NATIVE {
+        return Ok(home.to_path_buf());
     }
-    home.to_path_buf()
+    // 隔离模式下根本没有"别的环境"：非 native scope 一律拒绝写入。
+    // 这是硬保险——即使 scope 枚举被缓存或绕过，也不会碰到用户真实配置。
+    if agent_home_isolated() {
+        return Err(format!(
+            "隔离模式（{ENV_AGENT_HOME}）下不处理 {sid} 实例，已拒绝写入"
+        ));
+    }
+    scope::home_for_scope(sid, home).ok_or_else(|| {
+        format!("未找到运行环境 {sid}（WSL 发行版可能已停止或卸载），请先启动该发行版后重试")
+    })
 }
 
 /// 已知可检测的本机 Agent（接入器视图快速接入）。
@@ -223,6 +235,30 @@ pub const KNOWN_AGENTS: &[&str] = &["opencode", "codex", "hermes", "claude-code"
 pub struct AgentStatus {
     pub agent_id: String,
     pub adapter: &'static str,
+    /// 所在运行环境 id（`native` / `wsl:Ubuntu`）。
+    pub scope_id: String,
+    /// 运行环境展示名（本机 (Windows) / WSL · Ubuntu）。
+    pub scope_label: String,
+    /// 运行环境类型：`native` / `wsl`。
+    pub scope_kind: String,
+    pub config_path: Option<String>,
+    pub installed: bool,
+    pub attached: bool,
+    pub drifted: bool,
+    pub note: String,
+}
+
+/// 检测到的一个 Agent 实例（某个环境里的某个工具）。
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectedAgent {
+    /// 实例 id：本机 `hermes`，WSL `hermes@wsl:Ubuntu`。
+    pub agent_id: String,
+    /// 工具类型：`hermes` / `opencode` / `codex` / `claude-code`。
+    pub kind: String,
+    pub adapter: &'static str,
+    pub scope_id: String,
+    pub scope_label: String,
+    pub scope_kind: String,
     pub config_path: Option<String>,
     pub installed: bool,
     pub attached: bool,
@@ -256,18 +292,30 @@ const DRY_NOTE: &str = "dry-run：以下为将写入的变更预览，未落盘"
 /// 检测单个 agent 的适配器状态（只读）。
 pub fn detect(home: &Path, target: &Target) -> AgentStatus {
     let a = Adapter::resolve(&target.agent_id, &target.adapter);
+    let scope_id = scope::scope_of(&target.agent_id).to_string();
+    let scopes = scope::enumerate_cached(home);
+    let sc = scope::scope_by_id(&scopes, &scope_id);
+    let scope_label = sc.map(|s| s.label()).unwrap_or_else(|| scope_id.clone());
+    let scope_kind = sc.map(|s| s.kind.as_str()).unwrap_or("native").to_string();
     let home = &resolve_home(home, &target.agent_id, &target.adapter);
     let path = a.config_path(home, &target.agent_id);
     let cp = path.as_ref().map(|p| p.display().to_string());
     let mut s = AgentStatus {
         agent_id: target.agent_id.clone(),
         adapter: a.name(),
+        scope_id,
+        scope_label: scope_label.clone(),
+        scope_kind,
         config_path: cp,
         installed: false,
         attached: false,
         drifted: false,
         note: String::new(),
     };
+    if scope::scope_of(&target.agent_id) != scope::NATIVE && sc.is_none() {
+        s.note = "未找到该运行环境（WSL 发行版可能已停止或卸载）".into();
+        return s;
+    }
     match a {
         Adapter::Generic => {
             s.note = "通用 OpenAI-compatible：attach 仅打印环境变量模板，不写文件".into();
@@ -315,11 +363,8 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
             let mut locs: Vec<String> = Vec::new();
             if let Some(dir) = p.parent() {
                 if dir.is_dir() {
-                    locs.push(format!("本机：{}", dir.display()));
+                    locs.push(format!("{}：{}", scope_label, dir.display()));
                 }
-            }
-            for w in hm_windows_homes() {
-                locs.push(format!("Windows 侧：{w}"));
             }
             s.installed = !locs.is_empty();
             if let Ok(text) = std::fs::read_to_string(&p) {
@@ -336,9 +381,56 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
     s
 }
 
+/// 扫描全部环境（本机 + 各 WSL 发行版）下已安装的 Agent 实例。
+///
+/// 每个实例独立成条：`hermes`（本机）与 `hermes@wsl:Ubuntu`（WSL）是两个条目，
+/// 各自的配置文件、接入状态、漂移状态互不相干。
+pub fn detect_all(home: &Path, snap: &crate::config::Snapshot) -> Vec<DetectedAgent> {
+    let scopes = scope::enumerate_cached(home);
+    let gw = snap.gateway_addr.to_string();
+    let mut gnames: Vec<&String> = snap.groups.keys().collect();
+    gnames.sort();
+    let groups: Vec<String> = gnames.iter().map(|s| (*s).clone()).collect();
+    let mut out = Vec::new();
+    for sc in &scopes {
+        for kind in KNOWN_AGENTS {
+            let agent_id = scope::agent_id_for(kind, &sc.id);
+            // 默认组必须与巡检修复、CLI/UI 接入用的是同一套规则，否则会出现
+            // "检测说漂移、巡检说没漂移"的自相矛盾。
+            let default_group = snap.default_group_for(&agent_id);
+            let target = Target {
+                agent_id: agent_id.clone(),
+                default_group: default_group.clone(),
+                groups: groups.clone(),
+                models: crate::routable_models(snap, &default_group),
+                gateway_addr: gw.clone(),
+                adapter: (*kind).to_string(),
+            };
+            let st = detect(home, &target);
+            if !st.installed {
+                continue;
+            }
+            out.push(DetectedAgent {
+                agent_id: st.agent_id,
+                kind: (*kind).to_string(),
+                adapter: st.adapter,
+                scope_id: st.scope_id,
+                scope_label: st.scope_label,
+                scope_kind: st.scope_kind,
+                config_path: st.config_path,
+                installed: st.installed,
+                attached: st.attached,
+                drifted: st.drifted,
+                note: st.note,
+            });
+        }
+    }
+    out
+}
+
 /// dry-run：输出将修改的文件与 diff 预览，不落盘（§7 plan）。
 pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
-    let home = &resolve_home(home, &target.agent_id, &target.adapter);
+    let home = &scope_home(home, &target.agent_id)?;
     let a = Adapter::resolve(&target.agent_id, &target.adapter);
     match a {
         Adapter::Generic => Ok(generic_result(
@@ -370,7 +462,7 @@ pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
 
 /// 实际写入：备份 → 注入（幂等）。
 pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
-    let home = &resolve_home(home, &target.agent_id, &target.adapter);
+    let home = &scope_home(home, &target.agent_id)?;
     let a = Adapter::resolve(&target.agent_id, &target.adapter);
     match a {
         Adapter::Generic => Ok(generic_result(target, APPLIED_NOTE)),
@@ -444,6 +536,9 @@ pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
 /// 还原：优先从备份恢复（逐字节），备份丢失时精确删除注入块。
 pub fn revert(home: &Path, agent_id: &str, hint: &str) -> Result<ApplyResult, String> {
     let a = Adapter::resolve(agent_id, hint);
+    // 多环境实例：还原的是该环境里的那份配置（WSL 实例还原 WSL 里的文件）
+    let home = scope_home(home, agent_id)?;
+    let home = home.as_path();
     match a {
         Adapter::Generic => Ok(ApplyResult {
             agent_id: agent_id.into(),
@@ -600,20 +695,27 @@ fn oc_read(home: &Path, target: &Target) -> Result<(PathBuf, String), String> {
     let path = Adapter::OpenCode
         .config_path(home, &target.agent_id)
         .expect("opencode whitelist path");
-    // 多实例：独立文件缺失时，从主配置（或空 JSON）播种，避免要求用户手建文件
-    if !path.exists() && target.agent_id != "opencode" {
+    // 多实例：独立文件缺失时，从主配置播种，避免要求用户手建文件；
+    // 但"主实例"（opencode）本身缺失 → 说明该环境没装 OpenCode，拒绝凭空造文件。
+    let base = scope::kind_of(&target.agent_id);
+    if !path.exists() {
         let main = home.join(".config").join("opencode").join("opencode.json");
-        let seed = std::fs::read_to_string(&main).unwrap_or_else(|_| "{}".into());
+        if base == "opencode" {
+            return Err(format!(
+                "未检测到 OpenCode 配置文件 {}，请先在该环境安装 OpenCode",
+                path.display()
+            ));
+        }
+        let Ok(seed) = std::fs::read_to_string(&main) else {
+            return Err(format!(
+                "未检测到 OpenCode 配置文件 {}，请先在该环境安装 OpenCode",
+                path.display()
+            ));
+        };
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         std::fs::write(&path, seed).map_err(|e| format!("创建 {} 失败: {e}", path.display()))?;
-    }
-    if !path.exists() {
-        return Err(format!(
-            "未检测到 OpenCode 配置文件 {}，请先安装 OpenCode",
-            path.display()
-        ));
     }
     let text =
         std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
@@ -715,6 +817,7 @@ fn remove_oc_provider(doc: &mut serde_json::Value) -> Result<bool, String> {
 }
 
 fn oc_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> ApplyResult {
+    let base = scope::kind_of(&target.agent_id);
     ApplyResult {
         agent_id: target.agent_id.clone(),
         adapter: Adapter::OpenCode.name(),
@@ -723,7 +826,7 @@ fn oc_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> 
             preview: line_preview(old, new),
         }],
         env_template: None,
-        note: if target.agent_id == "opencode" {
+        note: if base == "opencode" {
             note.into()
         } else {
             format!(
@@ -763,11 +866,82 @@ fn cx_table_block(target: &Target) -> String {
     )
 }
 
-fn cx_defaults_block(target: &Target) -> String {
-    format!(
-        "{CX_DEF_BEGIN}\nmodel_provider = \"{PROVIDER_NAME}\"\nmodel = \"group/{}\"\n{CX_DEF_END}\n",
-        target.default_group
-    )
+/// 顶层 `model` 键期望值：网关暴露的组虚拟模型 ID（不带 provider 前缀）。
+fn cx_want_model(target: &Target) -> String {
+    format!("group/{}", target.default_group)
+}
+
+/// 顶层键的行号。TOML 规定顶层键必须位于所有表头之前，故"顶层"= 首个 `[table]` 之前的行。
+fn cx_top_key_idx(lines: &[&str], key: &str) -> Option<usize> {
+    let first_table = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    lines[..first_table].iter().position(|l| {
+        l.trim_start()
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    })
+}
+
+/// 顶层键的字符串值。
+fn cx_top_value<'a>(parsed: &'a toml::Value, key: &str) -> Option<&'a str> {
+    parsed.get(key).and_then(|v| v.as_str())
+}
+
+/// 原地改写一个顶层键的值，保留缩进与行尾注释。键不存在时原样返回。
+///
+/// 这是"AgentBuffet 最高优先级"的落点：用户自设的 `model_provider` / `model`
+/// 会被直接改写成 AgentBuffet 的值，而不是像以前那样跳过并让用户手动改。
+fn cx_set_top_key(text: &str, key: &str, value: &str) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(i) = cx_top_key_idx(&lines, key) else {
+        return (text.to_string(), false);
+    };
+    let line = lines[i];
+    let indent_len = line.len() - line.trim_start().len();
+    let indent = &line[..indent_len];
+    let Some(eq) = line.find('=') else {
+        return (text.to_string(), false);
+    };
+    let lhs = line[indent_len..eq + 1].trim_end(); // "model_provider ="
+                                                   // 行尾注释：仅当原值是简单引号字符串时才安全剥离（字符串内部可能含 '#'）。
+    let after = line[eq + 1..].trim_start();
+    let comment = match after.chars().next() {
+        Some(q @ ('"' | '\'')) => after[1..]
+            .find(q)
+            .and_then(|end| {
+                let tail = after[2 + end..].trim();
+                tail.starts_with('#').then(|| format!(" {tail}"))
+            })
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    let mut out: Vec<String> = lines.iter().map(|s| (*s).to_string()).collect();
+    out[i] = format!("{indent}{lhs} \"{value}\"{comment}");
+    let mut res = out.join("\n");
+    if text.ends_with('\n') {
+        res.push('\n');
+    }
+    (res, true)
+}
+
+/// 精确移除 defaults 区域（含标记行与其后紧跟的换行），不动文件里其它空行。
+fn cx_strip_def_region(text: &str) -> String {
+    let (Some(b), Some(e)) = (text.find(CX_DEF_BEGIN), text.find(CX_DEF_END)) else {
+        return text.to_string();
+    };
+    if e < b {
+        return text.to_string();
+    }
+    let mut end = e + CX_DEF_END.len();
+    if text[end..].starts_with('\n') {
+        end += 1;
+    }
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..b]);
+    out.push_str(&text[end..]);
+    out
 }
 
 /// 注入块属于我们：存在我们的表头标记且 provider 表在。
@@ -780,24 +954,20 @@ fn cx_has_ours(text: &str, parsed: &toml::Value, _target: &Target) -> bool {
             .is_some()
 }
 
+/// Codex 漂移判定：provider 表块 + 顶层 model_provider/model 都必须指向 AgentBuffet。
+///
+/// 顶层键是 Codex 真正生效的入口（provider 表只是定义）。只要这两个键被外部改回
+/// 别的 provider，就判漂移——巡检会把它抢回来。
 fn cx_drifted(text: &str, parsed: &toml::Value, target: &Target) -> bool {
-    // 注入块内容与期望不一致即漂移；defaults 仅在"应当存在"时参与比较。
+    // 1) provider 表块必须与我们期望的一致
     let want_table = cx_table_block(target);
     if extract_region(text, CX_TABLE_BEGIN, CX_TABLE_END).as_deref() != Some(want_table.trim_end())
     {
         return true;
     }
-    let user_top = parsed.get("model_provider").is_some() || parsed.get("model").is_some();
-    let has_def = text.contains(CX_DEF_BEGIN);
-    if has_def {
-        let want_def = cx_defaults_block(target);
-        if extract_region(text, CX_DEF_BEGIN, CX_DEF_END).as_deref() != Some(want_def.trim_end()) {
-            return true;
-        }
-    } else if !user_top {
-        return true; // 本应有 defaults 注入块却缺失
-    }
-    false
+    // 2) 顶层 model_provider / model 必须指向 AgentBuffet
+    cx_top_value(parsed, "model_provider") != Some(PROVIDER_NAME)
+        || cx_top_value(parsed, "model") != Some(cx_want_model(target).as_str())
 }
 
 /// 渲染注入后的完整文本。返回 (新文本, 附加提示)。
@@ -816,7 +986,6 @@ fn cx_render(
             "[model_providers.{PROVIDER_NAME}] 已存在但非 AgentBuffet 注入（缺少标记），拒绝写入；请手动删除后重试"
         ));
     }
-    let mut note = String::new();
 
     // 1) provider 表块：有标记则原位替换，否则追加文末。
     let table = cx_table_block(target);
@@ -832,17 +1001,43 @@ fn cx_render(
         out.push_str(&table);
     }
 
-    // 2) 顶层 defaults：仅当用户未自定义顶层 model/model_provider 时注入。
-    let user_top = parsed.get("model_provider").is_some() || parsed.get("model").is_some();
-    let def = cx_defaults_block(target);
-    let (body2, def_applied) = replace_region(&out, CX_DEF_BEGIN, CX_DEF_END, &def);
-    out = body2;
-    if !def_applied {
-        if user_top {
-            note = "检测到用户自定义的顶层 model/model_provider，未覆盖；请手动设置 model_provider = \"agentbuffet\"".to_string();
-        } else {
-            out = insert_before_first_table(&out, &def);
-        }
+    // 2) 顶层 model_provider / model：AgentBuffet 最高优先级，无条件接管。
+    //
+    //    以前这里是"检测到用户自定义就跳过"，结果是"已接入但没生效"——Codex 仍在
+    //    用用户原来的 provider。现在改为原地改写，原值留在 .before-agentbuffet
+    //    备份里，detach 可完整还原。
+    let want_model = cx_want_model(target);
+    let old_provider = cx_top_value(parsed, "model_provider").map(|s| s.to_string());
+    let old_model = cx_top_value(parsed, "model").map(|s| s.to_string());
+
+    // 旧的 defaults 块与顶层键内容重复，会构成 TOML 重复键——接管后必须移除。
+    out = cx_strip_def_region(&out);
+
+    let (t1, took_provider) = cx_set_top_key(&out, "model_provider", PROVIDER_NAME);
+    let (t2, took_model) = cx_set_top_key(&t1, "model", &want_model);
+    out = t2;
+
+    // 缺失的顶层键补在首个表头之前（TOML 顶层键必须先于所有 [table]）。
+    let mut missing = String::new();
+    if !took_provider {
+        missing.push_str(&format!("model_provider = \"{PROVIDER_NAME}\"\n"));
+    }
+    if !took_model {
+        missing.push_str(&format!("model = \"{want_model}\"\n"));
+    }
+    if !missing.is_empty() {
+        out = insert_before_first_table(&out, &missing);
+    }
+
+    let mut note = String::new();
+    if old_provider.as_deref() != Some(PROVIDER_NAME)
+        || old_model.as_deref() != Some(want_model.as_str())
+    {
+        note = format!(
+            "已接管顶层 model_provider/model（原 {} / {}）；AgentBuffet 为最高优先级，外部改回后巡检会自动抢回，detach 可从备份还原",
+            old_provider.as_deref().unwrap_or("(无)"),
+            old_model.as_deref().unwrap_or("(无)")
+        );
     }
     Ok((out, note))
 }
@@ -993,21 +1188,6 @@ fn line_preview(old: &str, new: &str) -> String {
 }
 
 // ---------------------------------------------------------------- Hermes（YAML）
-
-/// WSL 内探测 Windows 侧 Hermes 主目录（纯文件系统扫描，不起外部进程）。
-fn hm_windows_homes() -> Vec<String> {
-    let mut v = Vec::new();
-    let users = Path::new("/mnt/c/Users");
-    if let Ok(rd) = std::fs::read_dir(users) {
-        for entry in rd.flatten() {
-            let p = entry.path().join(".hermes");
-            if p.is_dir() {
-                v.push(p.display().to_string());
-            }
-        }
-    }
-    v
-}
 
 fn hm_read(home: &Path, target: &Target) -> Result<(PathBuf, String), String> {
     let path = Adapter::Hermes

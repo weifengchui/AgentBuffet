@@ -18,6 +18,9 @@ use tower::ServiceExt;
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
 fn temp_dir(tag: &str) -> PathBuf {
+    // 隔离：scope 枚举不再包含 WSL / Windows 侧的真实用户目录，测试既不会
+    // 改写用户真实配置，也不会读到它们。
+    onboard::enable_isolation_for_tests();
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let d = std::env::temp_dir().join(format!("buffet-m4-{tag}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -199,19 +202,22 @@ fn codex_attach_layout_and_detach_byte_identical() {
         Some("http://127.0.0.1:3425/codex/v1")
     );
     assert_eq!(parsed["model_provider"].as_str(), Some("agentbuffet"));
-    // defaults 在首个 [table] 之前，provider 表块在文末
-    let i_def = text.find("# >>> agentbuffet:defaults:begin").unwrap();
+    assert_eq!(parsed["model"].as_str(), Some("group/g"));
+    // 顶层键必须先于所有 [table]（TOML 语法要求），provider 表块在文末
+    let i_model = text.find("model_provider = ").unwrap();
     let i_feat = text.find("[features]").unwrap();
     let i_tbl = text.find("# >>> agentbuffet:begin").unwrap();
-    assert!(i_def < i_feat && i_feat < i_tbl);
+    assert!(i_model < i_feat && i_feat < i_tbl);
 
     let r2 = onboard::revert(&home, "codex", "").unwrap();
     assert!(r2.note.contains("逐字节"), "{}", r2.note);
     assert_eq!(std::fs::read(&p).unwrap(), orig.as_bytes());
 }
 
+/// 用户自定义了顶层 model/model_provider 时，AgentBuffet 仍然原地接管
+/// （最高优先级）——不再像以前那样跳过并让用户手动改。
 #[test]
-fn codex_user_top_model_skips_defaults() {
+fn codex_user_top_model_is_taken_over() {
     let home = temp_dir("cx-usertop");
     let p = home.join(".codex").join("config.toml");
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -219,18 +225,146 @@ fn codex_user_top_model_skips_defaults() {
     std::fs::write(&p, orig).unwrap();
 
     let r = onboard::apply(&home, &target("codex", "127.0.0.1:3425")).unwrap();
-    assert!(r.note.contains("用户自定义"), "{}", r.note);
+    assert!(r.note.contains("已接管"), "{}", r.note);
     let text = std::fs::read_to_string(&p).unwrap();
-    assert!(!text.contains("agentbuffet:defaults"));
+    assert!(
+        !text.contains("agentbuffet:defaults"),
+        "接管后不应再有 defaults 块（会与顶层键构成 TOML 重复键）"
+    );
     assert!(text.contains("[model_providers.agentbuffet]"));
     let parsed: toml::Value = text.parse().unwrap();
-    assert_eq!(parsed["model_provider"].as_str(), Some("openai"));
+    assert_eq!(parsed["model_provider"].as_str(), Some("agentbuffet"));
+    assert_eq!(parsed["model"].as_str(), Some("group/g"));
 
     let r2 = onboard::revert(&home, "codex", "").unwrap();
     assert!(r2.note.contains("逐字节"), "{}", r2.note);
     assert_eq!(std::fs::read(&p).unwrap(), orig.as_bytes());
 }
 
+/// 最高优先级：外部把顶层键改回别的 provider 后，应判为漂移并能抢回。
+#[test]
+fn codex_takeover_is_reasserted_after_external_edit() {
+    let home = temp_dir("cx-priority");
+    let p = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "model_provider = \"openai\"\nmodel = \"gpt-5\"\n").unwrap();
+
+    let t = target("codex", "127.0.0.1:3425");
+    onboard::apply(&home, &t).unwrap();
+
+    // 模拟外部工具改回原来的 provider
+    let text = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(
+        &p,
+        text.replace(
+            "model_provider = \"agentbuffet\"",
+            "model_provider = \"openai\"",
+        ),
+    )
+    .unwrap();
+
+    // 判定为漂移（顶层 provider 不再指向 AgentBuffet）
+    let s = onboard::detect(&home, &t);
+    assert!(s.attached, "注入块仍在，应算已接入");
+    assert!(s.drifted, "顶层键被改回，应判为漂移");
+
+    // 巡检/重新接入把它抢回来
+    onboard::apply(&home, &t).unwrap();
+    let parsed: toml::Value = std::fs::read_to_string(&p).unwrap().parse().unwrap();
+    assert_eq!(parsed["model_provider"].as_str(), Some("agentbuffet"));
+    assert_eq!(parsed["model"].as_str(), Some("group/g"));
+}
+
+/// 接管顶层键时保留行尾注释与缩进，不破坏用户原有书写风格。
+#[test]
+fn codex_takeover_preserves_comment_and_indent() {
+    let home = temp_dir("cx-comment");
+    let p = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "model_provider = \"openai\" # 用户的注释\n").unwrap();
+
+    onboard::apply(&home, &target("codex", "127.0.0.1:3425")).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.contains("model_provider = \"agentbuffet\" # 用户的注释"),
+        "行尾注释应保留: {text}"
+    );
+}
+
+/// 巡检只覆盖**已登记**的 agent：未登记的实例不会被自动改写。
+///
+/// 这既是权限边界（不碰用户没要求接入的环境），也是一道安全保证——巡检绝不会
+/// 因为扫到别的环境就把用户真实配置改掉（测试里若越界，会把测试端口写进用户
+/// 真实的 WSL 配置，表现为"接入后一直漂移"）。
+#[tokio::test]
+async fn repair_drifted_skips_unregistered_instances() {
+    let home = temp_dir("repair-unreg");
+    let p = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    // 已接入，但 base_url 指向别的网关（旧方案/被改旧）→ 漂移
+    std::fs::write(
+        &p,
+        "model_provider = \"agentbuffet\"\nmodel = \"group/g\"\n\n\
+         # >>> agentbuffet:begin\n[model_providers.agentbuffet]\nname = \"AgentBuffet\"\n\
+         base_url = \"http://127.0.0.1:9999/codex/v1\"\nwire_api = \"chat\"\n# <<< agentbuffet:end\n",
+    )
+    .unwrap();
+
+    // m4_config 的 agents 里没有 codex —— 未登记实例
+    let (st, _d) = state_for("repair-unreg", home.clone());
+    assert!(!st.snap.read().await.agents.contains_key("codex"));
+
+    let fixed = agentbuffet::repair_drifted(&st).await;
+    assert!(
+        !fixed.contains(&"codex".to_string()),
+        "未登记实例不应被巡检自动修复: {fixed:?}"
+    );
+
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.contains("127.0.0.1:9999"),
+        "未登记实例的配置不应被改写: {text}"
+    );
+}
+
+/// 已登记的实例即使被外部改回，巡检也会把它抢回来（最高优先级）。
+#[tokio::test]
+async fn repair_drifted_reasserts_registered_instance() {
+    let home = temp_dir("repair-reg");
+    let p = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    // 已接入，但 base_url 指向别的网关（旧方案/被改旧）→ 漂移
+    std::fs::write(
+        &p,
+        "model_provider = \"agentbuffet\"\nmodel = \"group/g\"\n\n\
+         # >>> agentbuffet:begin\n[model_providers.agentbuffet]\nname = \"AgentBuffet\"\n\
+         base_url = \"http://127.0.0.1:9999/codex/v1\"\nwire_api = \"chat\"\n# <<< agentbuffet:end\n",
+    )
+    .unwrap();
+
+    // 配置里登记 codex（m4_config 没有 → 手工补一条）
+    let (st, dir) = state_for("repair-reg", home.clone());
+    let cfg = dir.join("config.yaml");
+    let mut yaml = std::fs::read_to_string(&cfg).unwrap();
+    yaml.push_str("  - { id: codex, default_group: g }\n");
+    std::fs::write(&cfg, &yaml).unwrap();
+    let snap = config::load_str(&yaml, "test.yaml").expect("config ok");
+    *st.snap.write().await = Arc::new(snap);
+
+    let fixed = agentbuffet::repair_drifted(&st).await;
+    assert!(
+        fixed.contains(&"codex".to_string()),
+        "已登记实例应被修复: {fixed:?}"
+    );
+
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        !text.contains("127.0.0.1:9999"),
+        "base_url 应改回当前网关: {text}"
+    );
+}
+
+/// 通用适配器（Generic）→ 422/400：协议不支持的 claude-code 必须拒绝。
 #[test]
 fn generic_attach_prints_template_without_files() {
     let home = temp_dir("generic");
@@ -259,6 +393,90 @@ fn drift_after_gateway_addr_change() {
     onboard::apply(&home, &target("opencode", "127.0.0.1:9999")).unwrap();
     let s2 = onboard::detect(&home, &target("opencode", "127.0.0.1:9999"));
     assert!(s2.attached && !s2.drifted, "{s2:?}");
+}
+
+// ---------------------------------------------------------------- 多环境隔离
+
+/// 同名 Agent 在不同环境（scope）里是**独立实例**：配置各写各的，互不覆盖。
+///
+/// 这是 Magpie 的核心语义（`codex@wsl:Ubuntu` vs `codex`），本项目沿用。
+#[test]
+fn same_agent_in_two_scopes_writes_separate_configs() {
+    let home = temp_dir("scope-split");
+    // 本机侧：装 opencode
+    let oc = home.join(".config").join("opencode").join("opencode.json");
+    std::fs::create_dir_all(oc.parent().unwrap()).unwrap();
+    std::fs::write(&oc, "{}\n").unwrap();
+
+    // 本机实例与"另一个环境"的实例，base_url 里的路径前缀必须不同
+    let t_native = target("opencode", "127.0.0.1:3425");
+
+    let r1 = onboard::apply(&home, &t_native).unwrap();
+    assert!(r1.files[0].path.contains("opencode.json"), "{:?}", r1.files);
+
+    // 适配器按 id 推断时必须忽略 @scope 后缀：两者都应是 opencode 适配器
+    assert_eq!(
+        onboard::Adapter::for_agent("opencode@wsl:Ubuntu"),
+        onboard::Adapter::OpenCode
+    );
+    assert_eq!(
+        onboard::Adapter::for_agent("opencode"),
+        onboard::Adapter::OpenCode
+    );
+
+    // 基础类型剥离后一致，scope 不同 → id 不同
+    assert_eq!(
+        agentbuffet::scope::kind_of("opencode@wsl:Ubuntu"),
+        "opencode"
+    );
+    assert_ne!(
+        agentbuffet::scope::scope_of("opencode@wsl:Ubuntu"),
+        agentbuffet::scope::scope_of("opencode")
+    );
+}
+
+/// 环境不存在时（发行版已停止/卸载），写操作必须报错，**绝不能落到本机配置上**。
+#[test]
+fn unknown_scope_attach_is_refused() {
+    let home = temp_dir("scope-missing");
+    let oc = home.join(".config").join("opencode").join("opencode.json");
+    std::fs::create_dir_all(oc.parent().unwrap()).unwrap();
+    let orig = "{}\n";
+    std::fs::write(&oc, orig).unwrap();
+
+    // wsl:NoSuchDistro 不在环境列表里 → 拒绝，且本机文件不能被改
+    let t = target("opencode@wsl:NoSuchDistro", "127.0.0.1:3425");
+    let err = onboard::apply(&home, &t).unwrap_err();
+    assert!(err.contains("运行环境") || err.contains("wsl"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&oc).unwrap(),
+        orig,
+        "本机配置不能被改动"
+    );
+}
+
+/// detect_all：只列装了 Agent 的环境实例，且每个实例带自己的 scope 信息。
+#[test]
+fn detect_all_reports_scope_per_instance() {
+    let home = temp_dir("scope-detect");
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    std::fs::write(home.join(".codex").join("config.toml"), "model = \"gpt\"\n").unwrap();
+
+    let snap = config::load_str(
+        &m4_config("http://127.0.0.1:1/v1", "http://127.0.0.1:2/v1"),
+        "test.yaml",
+    )
+    .expect("config ok");
+    let list = onboard::detect_all(&home, &snap);
+    let codex = list
+        .iter()
+        .find(|a| a.agent_id == "codex")
+        .expect("应检出本机的 codex");
+    assert_eq!(codex.kind, "codex");
+    assert_eq!(codex.scope_kind, "native");
+    assert_eq!(codex.scope_id, "native");
+    assert!(codex.installed);
+    assert!(codex.config_path.as_deref().unwrap().contains(".codex"));
 }
 
 // ---------------------------------------------------------------- 管理面 HTTP
@@ -356,7 +574,8 @@ async fn attach_detach_roundtrip_via_http() {
     std::fs::write(&p, orig).unwrap();
     let (st, _d) = state_for("http-oc", home.clone());
 
-    // 未知 agent → 400
+    // 未登记的 agent（多环境实例常见）→ 200，并自动补登记进网关配置，
+    // 让网关侧的 /<agent-id>/v1 前缀能对上。
     let (code, j) = call(
         st.clone(),
         LB,
@@ -365,8 +584,14 @@ async fn attach_detach_roundtrip_via_http() {
         Some(serde_json::json!({"agent_id": "nope"})),
     )
     .await;
-    assert_eq!(code, StatusCode::BAD_REQUEST);
-    assert!(j["error"].as_str().unwrap().contains("nope"));
+    assert_eq!(code, StatusCode::OK, "{j}");
+    let (code, j) = call(st.clone(), LB, "GET", "/api/agents", None).await;
+    assert_eq!(code, StatusCode::OK);
+    let arr = j.as_array().unwrap();
+    assert!(
+        arr.iter().any(|a| a["agent_id"] == "nope"),
+        "未登记的实例应被自动补登记: {arr:?}"
+    );
 
     // dry-run 不落盘
     let (code, j) = call(

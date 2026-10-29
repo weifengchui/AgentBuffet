@@ -41,7 +41,7 @@ No database. No sidecar processes. No C runtime. One binary, done.
 | 🔀 **Failover** | Priority-ordered routing chain, sliding-window circuit breaker, quota soft caps, passive 429 calibration, first-chunk error switching |
 | 🔑 **Key rotation** | Multiple API keys per provider, round-robin; 401/403 auto-switches to the next key before failing over |
 | 🖥️ **Form-driven console** | Bilingual (zh/EN) web UI: pick vendor → pick plan → paste key. Drag-to-reorder routing, free-model badges, hot reload — no hand-written YAML required |
-| 🔌 **Agent attach** | Auto-detects installed OpenCode / Codex / Hermes and injects gateway config (backed up first, byte-exact restore on detach). Drift is detected and repaired automatically; multiple OpenCode instances supported |
+| 🔌 **Agent attach** | Auto-detects installed OpenCode / Codex / Hermes **across environments** (native / WSL distros / Windows side) and injects gateway config (backed up first, byte-exact restore on detach). Same-named agents in different environments are independent instances — separate configs, separate usage stats. Drift is detected and repaired automatically; multiple OpenCode instances supported |
 | 🌊 **Zero-buffer SSE** | Streaming responses are forwarded chunk by chunk — no aggregation, no added latency |
 | 🔒 **Encrypted backup** | Config + all keys exported as a password-encrypted `.aback` (Argon2id + AES-256-GCM) |
 | 🚀 **Autostart** | systemd user unit (Linux), LaunchAgent (macOS), Startup folder (Windows) — pure file operations |
@@ -168,7 +168,24 @@ the data directory (usage logs, key env file).
 - `base_url` pointing at private/loopback IPs requires an explicit `allow_private: true` (fail-closed).
 - The attach writer only touches a whitelist of files, refuses to write on parse failure,
   and always backs up first.
+- **AgentBuffet's injection is authoritative**: attaching takes over the tool's own config
+  keys in place (e.g. Codex's top-level `model_provider` / `model`) instead of working
+  around them — otherwise "attached" is cosmetic and the tool keeps using its original
+  provider. If something external changes them back, the 30s patrol re-asserts our
+  values; `detach` restores your original settings byte-exactly from the backup.
+- The patrol covers instances **registered in the gateway config** (including multi-environment
+  ones like `hermes@wsl:Ubuntu` — attaching registers them automatically). Instances you never
+  attached are left alone: the patrol only writes files belonging to agents named in the
+  config, so it never reaches into another environment to touch your real settings.
 - Nothing phones home: no telemetry, no external processes, model catalog fetches are plain HTTPS.
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `AGENTBUFFET_CONFIG` | Gateway config path (default `~/.agentbuffet/config.yaml`) |
+| `AGENTBUFFET_HOME` | AgentBuffet's own data dir (default `~/.agentbuffet`) |
+| `AGENTBUFFET_AGENT_HOME` | **Tests / isolated instances only**: redirects the agent configs the attacher reads and writes to this dir, and stops enumerating real WSL / Windows user directories. `AGENTBUFFET_CONFIG` only isolates the gateway config — without this switch an isolated instance's `attach` rewrites your real `~/.codex/config.toml` |
 
 ## Build from source
 

@@ -18,6 +18,9 @@ use tokio::net::TcpListener;
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
 fn temp_dir(tag: &str) -> PathBuf {
+    // 隔离：scope 枚举不再包含 WSL / Windows 侧的真实用户目录，测试既不会
+    // 改写用户真实配置，也不会读到它们。
+    agentbuffet::onboard::enable_isolation_for_tests();
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let d = std::env::temp_dir().join(format!("buffet-m3-{tag}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -570,5 +573,62 @@ async fn restart_rebuilds_today_counters() {
     let u2 = Usage::new(f.logs(), Path::new("/nonexistent-prices.yaml"));
     let after = u2.counters();
     assert_eq!(before, after, "重启后当日 counters 必须从 JSONL 重建一致");
+    cleanup(&f.dir);
+}
+
+/// 多环境隔离（端到端）：本机 `hermes` 与 WSL 实例 `hermes@wsl:Ubuntu` 是两条
+/// 独立的 agent 记录——请求路径前缀不同、用量分开记账，互不串味。
+#[tokio::test]
+async fn scoped_agent_instance_has_separate_usage_from_native() {
+    let (mock, _ms) = spawn_mock().await;
+    let yaml = gw_config(
+        &[prov("good-1", &mock, &["usage-chat"])],
+        &[(1, "good-1", "usage-chat")],
+        None,
+    )
+    .replace(
+        "  - { id: hermes, display_name: Hermes, default_group: g }",
+        "  - { id: hermes, display_name: Hermes, default_group: g }\n  - { id: \"hermes@wsl:Ubuntu\", default_group: g }",
+    );
+    let f = spawn_full(&yaml, "scope-usage").await;
+
+    // 本机实例
+    let r1 = reqwest::Client::new()
+        .post(format!("{}/hermes/v1/chat/completions", f.gw))
+        .json(&serde_json::json!({"model": "usage-chat", "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r1.status(), StatusCode::OK);
+
+    // WSL 实例（id 含 @ 与 :，路径前缀未编码）
+    let r2 = reqwest::Client::new()
+        .post(format!("{}/hermes@wsl:Ubuntu/v1/chat/completions", f.gw))
+        .json(&serde_json::json!({"model": "usage-chat", "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r2.status(), StatusCode::OK);
+
+    // 同一实例再打一次，验证计数递增而非共用
+    let r3 = reqwest::Client::new()
+        .post(format!("{}/hermes@wsl:Ubuntu/v1/chat/completions", f.gw))
+        .json(&serde_json::json!({"model": "usage-chat", "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r3.status(), StatusCode::OK);
+
+    let counters = f.state.usage.as_ref().unwrap().counters();
+    let native = counters
+        .get(&("hermes".into(), "g".into(), "good-1".into()))
+        .map(|c| c.requests)
+        .unwrap_or(0);
+    let wsl = counters
+        .get(&("hermes@wsl:Ubuntu".into(), "g".into(), "good-1".into()))
+        .map(|c| c.requests)
+        .unwrap_or(0);
+    assert_eq!(native, 1, "本机实例应只记 1 次：{counters:?}");
+    assert_eq!(wsl, 2, "WSL 实例应记 2 次：{counters:?}");
     cleanup(&f.dir);
 }

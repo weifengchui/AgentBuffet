@@ -74,7 +74,35 @@ pub fn parse_path(path: &str) -> Result<(String, String), RouteError> {
         )));
     }
     let rest: Vec<&str> = segs.collect();
-    Ok((agent.to_string(), rest.join("/")))
+    Ok((decode_segment(agent), rest.join("/")))
+}
+
+/// 路径段百分号解码。
+///
+/// 多环境实例的 id 形如 `hermes@wsl:Ubuntu`——`@` 与 `:` 在 RFC 3986 的 path
+/// 段里是合法字符，但部分 HTTP 客户端仍会编码成 `%40` / `%3A`。这里做一次
+/// 解码兜底，两种写法都能命中同一个 agent id。
+fn decode_segment(s: &str) -> String {
+    if !s.contains('%') {
+        return s.to_string();
+    }
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// 依据 §6 规则解析 model→路由组，产出候选列表。
@@ -200,5 +228,17 @@ mod tests {
     #[test]
     fn parse_requires_v1_second() {
         assert!(parse_path("/hermes/chat/completions").is_err());
+    }
+
+    /// 多环境实例 id（`hermes@wsl:Ubuntu`）走路径前缀时，未编码与百分号编码
+    /// 两种写法都要解析到同一个 agent id。
+    #[test]
+    fn parse_scoped_agent_id_encoded_and_plain() {
+        let (a, p) = parse_path("/hermes@wsl:Ubuntu/v1/chat/completions").unwrap();
+        assert_eq!(a, "hermes@wsl:Ubuntu");
+        assert_eq!(p, "chat/completions");
+
+        let (a2, _) = parse_path("/hermes%40wsl%3AUbuntu/v1/chat/completions").unwrap();
+        assert_eq!(a2, "hermes@wsl:Ubuntu");
     }
 }

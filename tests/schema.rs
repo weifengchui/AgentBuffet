@@ -13,6 +13,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
 fn temp_dir(tag: &str) -> PathBuf {
+    // 隔离：scope 枚举不再包含 WSL / Windows 侧的真实用户目录，测试既不会
+    // 改写用户真实配置，也不会读到它们。
+    onboard::enable_isolation_for_tests();
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let d = std::env::temp_dir().join(format!("buffet-schema-{tag}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -161,8 +164,8 @@ fn codex_injected_toml_schema() {
     );
     let t = target("codex");
     let r = onboard::apply(&home, &t).expect("apply ok");
-    // 用户自定义了顶层 model：不覆盖，只注入 provider 表块并提示
-    assert!(r.note.contains("未覆盖"), "note: {}", r.note);
+    // 用户自定义了顶层 model：AgentBuffet 最高优先级，原地接管（不跳过）。
+    assert!(r.note.contains("已接管"), "note: {}", r.note);
 
     let text = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap();
     let v: toml::Value = text.parse().expect("注入后仍是合法 TOML");
@@ -178,8 +181,15 @@ fn codex_injected_toml_schema() {
     );
     assert_eq!(p.get("wire_api").and_then(|x| x.as_str()), Some("chat"));
 
-    // 用户顶层 model 未被改写
-    assert_eq!(v.get("model").and_then(|x| x.as_str()), Some("gpt-4o"));
+    // 顶层键被接管为 AgentBuffet——Codex 真正生效的开关在这里。
+    assert_eq!(
+        v.get("model_provider").and_then(|x| x.as_str()),
+        Some("agentbuffet")
+    );
+    assert_eq!(
+        v.get("model").and_then(|x| x.as_str()),
+        Some("group/coding-flash")
+    );
     // 用户原有表块保留
     assert!(v.get("shell").is_some(), "shell 表块应保留");
 }

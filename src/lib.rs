@@ -7,6 +7,7 @@ pub mod failover;
 pub mod onboard;
 pub mod proxy;
 pub mod router;
+pub mod scope;
 pub mod securebox;
 pub mod usage;
 pub mod vendors;
@@ -327,28 +328,42 @@ async fn agent_attach(
         return r;
     }
     let snap = st.snap.read().await.clone();
-    let Some(a) = snap.agents.get(&req.agent_id) else {
+    let existing = snap.agents.get(&req.agent_id);
+    let mut gnames: Vec<&String> = snap.groups.keys().collect();
+    gnames.sort();
+    let groups: Vec<String> = gnames.iter().map(|s| (*s).clone()).collect();
+
+    // 组：显式指定 > 已配置实例的默认组 > 第一个组。
+    //
+    // 多环境实例（hermes@wsl:Ubuntu / hermes@win:yxf）默认不在配置里，
+    // 以前这里直接 400，导致 UI 的"快速接入"按钮点不动——现在允许直接接入，
+    // 写完工具配置后自动补一条 agent 记录，让网关侧的 /<agent-id>/v1 对得上。
+    let group = req
+        .group
+        .clone()
+        .or_else(|| existing.map(|a| a.default_group.clone()))
+        .or_else(|| groups.first().cloned())
+        .unwrap_or_default();
+    if group.is_empty() {
         return json_response(
             StatusCode::BAD_REQUEST,
-            serde_json::json!({"error": format!("配置中不存在 agent: {}", req.agent_id)}),
+            serde_json::json!({"error": "配置中无可用路由组，请先创建路由组或指定 group"}),
         );
-    };
-    let group = req.group.unwrap_or_else(|| a.default_group.clone());
+    }
     if !snap.groups.contains_key(&group) {
         return json_response(
             StatusCode::BAD_REQUEST,
             serde_json::json!({"error": format!("路由组不存在: {group}")}),
         );
     }
-    let mut gnames: Vec<&String> = snap.groups.keys().collect();
-    gnames.sort();
+    let adapter = existing.map(|a| a.adapter.clone()).unwrap_or_default();
     let target = onboard::Target {
         agent_id: req.agent_id.clone(),
         default_group: group.clone(),
-        groups: gnames.into_iter().cloned().collect(),
+        groups,
         models: routable_models(&snap, &group),
         gateway_addr: snap.gateway_addr.to_string(),
-        adapter: a.adapter.clone(),
+        adapter: adapter.clone(),
     };
     let res = if req.dry_run {
         onboard::plan(&st.home, &target)
@@ -356,10 +371,30 @@ async fn agent_attach(
         onboard::apply(&st.home, &target)
     };
     match res {
-        Ok(r) => json_response(
-            StatusCode::OK,
-            serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({})),
-        ),
+        Ok(r) => {
+            let mut payload = serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({}));
+            // 未在配置里的实例：补一条 agent 记录并热重载，网关侧即刻认得这个前缀。
+            if existing.is_none() && !req.dry_run {
+                if let Some(path) = st.config_path.clone() {
+                    match config::upsert_agent(&path, &req.agent_id, &group, &adapter) {
+                        Ok(()) => {
+                            let _ = do_reload(&st).await;
+                        }
+                        Err(e) => {
+                            if let Some(obj) = payload.as_object_mut() {
+                                obj.insert(
+                                    "warning".into(),
+                                    serde_json::json!(format!(
+                                        "已写入工具配置，但补写 agent 配置失败: {e}"
+                                    )),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            json_response(StatusCode::OK, payload)
+        }
         Err(e) => json_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             serde_json::json!({"error": e}),
@@ -446,18 +481,53 @@ async fn autostart_set(
 /// 自动修复已接入但配置漂移的 Agent（仅会写文件的适配器），返回被修复的 agent id。
 pub async fn repair_drifted(st: &proxy::AppState) -> Vec<String> {
     let snap = st.snap.read().await.clone();
+    let mut gnames: Vec<&String> = snap.groups.keys().collect();
+    gnames.sort();
+    let groups: Vec<String> = gnames.iter().map(|s| (*s).clone()).collect();
+
+    // 巡检范围 = 网关配置里登记的 agent。
+    //
+    // 只覆盖"已登记"的：接入（attach）会把实例自动补登记进配置，因此用户接入过
+    // 的实例（含 WSL 里的 hermes@wsl:Ubuntu）都在范围内；没接入过的不碰——
+    // 自动改写用户没要求接入的环境，属于越权。
+    //
+    // 这样也带来一个硬保证：巡检只写"网关配置里点名的 agent 所在环境的配置
+    // 文件"，不会因为扫到别的环境就把用户真实配置改掉。
+    let ids: Vec<String> = {
+        let mut v: Vec<String> = snap.agents.keys().cloned().collect();
+        v.sort();
+        v
+    };
+
     let mut refreshed = Vec::new();
-    for t in agent_targets(&snap) {
-        let a = onboard::Adapter::resolve(&t.agent_id, &t.adapter);
+    for id in ids {
+        // 已登记的实例用它自己的默认组与适配器。
+        let Some(agent) = snap.agents.get(&id) else {
+            continue;
+        };
+        let adapter = agent.adapter.clone();
+        let default_group = agent.default_group.clone();
+        if default_group.is_empty() {
+            continue; // 没有任何路由组时构造不出注入目标
+        }
+        let a = onboard::Adapter::resolve(&id, &adapter);
         if !matches!(
             a,
             onboard::Adapter::OpenCode | onboard::Adapter::Codex | onboard::Adapter::Hermes
         ) {
             continue;
         }
-        let d = onboard::detect(&st.home, &t);
-        if d.attached && d.drifted && onboard::apply(&st.home, &t).is_ok() {
-            refreshed.push(t.agent_id.clone());
+        let target = onboard::Target {
+            agent_id: id.clone(),
+            default_group: default_group.clone(),
+            groups: groups.clone(),
+            models: routable_models(&snap, &default_group),
+            gateway_addr: snap.gateway_addr.to_string(),
+            adapter,
+        };
+        let d = onboard::detect(&st.home, &target);
+        if d.attached && d.drifted && onboard::apply(&st.home, &target).is_ok() {
+            refreshed.push(id);
         }
     }
     refreshed
@@ -1694,7 +1764,27 @@ async fn agent_upsert(
             .iter_mut()
             .find(|a| yaml_str(a, "id").as_deref() == Some(id.as_str()))
         {
-            Some(a) => *a = serde_yaml::Value::Mapping(map),
+            Some(a) => {
+                // 已在配置里的实例（如漂移后重接）：保留原有 display_name / adapter，
+                // 只更新本次明确给出的字段，避免"快捷接入"把用户的显示名抹掉。
+                if dn.trim().is_empty() {
+                    if let Some(old) = yaml_str(a, "display_name") {
+                        map.insert(ystr("display_name"), ystr(&old));
+                    }
+                }
+                if body
+                    .adapter
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    if let Some(old) = yaml_str(a, "adapter") {
+                        map.insert(ystr("adapter"), ystr(&old));
+                    }
+                }
+                *a = serde_yaml::Value::Mapping(map);
+            }
             None => as_.push(serde_yaml::Value::Mapping(map)),
         }
         Ok(vec![])
@@ -1868,7 +1958,11 @@ async fn provider_keys(
     json_response(StatusCode::OK, serde_json::json!({"key_count": keys.len()}))
 }
 
-/// 本机 Agent 检测（接入器快速接入）：逐个探测已知适配器的配置文件。
+/// 本机 Agent 检测（接入器快速接入）：扫描**本机 + 每个 WSL 发行版**，
+/// 按环境分组返回已安装的 Agent 实例。
+///
+/// 本机的 `hermes` 与 WSL 里的 `hermes@wsl:Ubuntu` 是两个独立条目，
+/// 各自的配置文件、接入状态、漂移状态互不相干。
 async fn agents_detect(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(st): State<Arc<proxy::AppState>>,
@@ -1877,27 +1971,55 @@ async fn agents_detect(
         return r;
     }
     let snap = st.snap.read().await.clone();
-    let mut out: Vec<serde_json::Value> = Vec::new();
-    for id in onboard::KNOWN_AGENTS {
-        let target = onboard::Target {
-            agent_id: (*id).to_string(),
-            default_group: String::new(),
-            groups: Vec::new(),
-            models: Vec::new(),
-            adapter: String::new(),
-            gateway_addr: snap.gateway_addr.to_string(),
-        };
-        let mut v = serde_json::to_value(onboard::detect(&st.home, &target))
-            .unwrap_or_else(|_| serde_json::json!({}));
-        if let Some(obj) = v.as_object_mut() {
-            obj.insert(
-                "in_config".into(),
-                serde_json::json!(snap.agents.contains_key(*id)),
-            );
+    let detected = onboard::detect_all(&st.home, &snap);
+    let scopes = scope::enumerate_cached(&st.home);
+
+    // 按环境分组（只列装了 Agent 的环境）
+    let mut groups: Vec<serde_json::Value> = Vec::new();
+    for sc in &scopes {
+        let items: Vec<&onboard::DetectedAgent> =
+            detected.iter().filter(|a| a.scope_id == sc.id).collect();
+        if items.is_empty() {
+            continue;
         }
-        out.push(v);
+        groups.push(serde_json::json!({
+            "id": sc.id,
+            "kind": sc.kind.as_str(),
+            "label": sc.label(),
+            "distro": sc.distro,
+            "home": sc.home.display().to_string(),
+            "note": sc.note,
+            "agents": items,
+        }));
     }
-    json_response(StatusCode::OK, serde_json::Value::Array(out))
+
+    // 扁平列表：附上"是否已在网关配置里"与默认组，供前端一键接入
+    let flat: Vec<serde_json::Value> = detected
+        .iter()
+        .map(|d| {
+            let mut v = serde_json::to_value(d).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(obj) = v.as_object_mut() {
+                let in_config = snap.agents.get(&d.agent_id);
+                obj.insert("in_config".into(), serde_json::json!(in_config.is_some()));
+                obj.insert(
+                    "default_group".into(),
+                    serde_json::json!(in_config.map(|a| a.default_group.clone())),
+                );
+                obj.insert(
+                    "display_name".into(),
+                    serde_json::json!(in_config
+                        .map(|a| a.display_name.clone())
+                        .unwrap_or_default()),
+                );
+            }
+            v
+        })
+        .collect();
+
+    json_response(
+        StatusCode::OK,
+        serde_json::json!({ "scopes": groups, "agents": flat }),
+    )
 }
 
 // ---------------------------------------------------------------- 加密备份

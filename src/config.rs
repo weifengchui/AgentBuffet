@@ -236,6 +236,20 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// 某个 agent 实例的默认组：已登记的用它自己的；未登记的用第一个路由组
+    /// （按名排序）。
+    ///
+    /// 检测与巡检必须用同一套规则，否则会出现"检测说漂移、巡检说没漂移"这种
+    /// 自相矛盾——多环境实例（hermes@wsl:Ubuntu）尤其容易踩到。
+    pub fn default_group_for(&self, agent_id: &str) -> String {
+        if let Some(a) = self.agents.get(agent_id) {
+            return a.default_group.clone();
+        }
+        let mut names: Vec<&String> = self.groups.keys().collect();
+        names.sort();
+        names.first().map(|s| (*s).clone()).unwrap_or_default()
+    }
+
     /// 组内启用成员按 priority 升序（路由候选）。
     pub fn active_members(&self, group: &str) -> Vec<&Member> {
         self.group_members(group)
@@ -374,17 +388,20 @@ pub fn load_str(text: &str, filename: &str) -> Result<Snapshot, Vec<String>> {
     // agents
     let mut agents: HashMap<String, Agent> = HashMap::new();
     for a in &raw.agents {
-        if RESERVED_SEGMENTS.contains(&a.id.as_str()) {
+        if RESERVED_SEGMENTS
+            .iter()
+            .any(|r| r.eq_ignore_ascii_case(a.id.as_str()))
+        {
             errs.push(format!("{filename}: agent id \"{}\" 为保留字", a.id));
         }
         if a.id.is_empty()
-            || !a
-                .id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            || !a.id.chars().all(|c| {
+                // 多环境实例形如 hermes@wsl:Ubuntu：@ 与 : 用于标记运行环境
+                c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | ':')
+            })
         {
             errs.push(format!(
-                "{filename}: agent id {} 只允许小写字母/数字/-/_",
+                "{filename}: agent id {} 只允许字母/数字/-/_/./@/:",
                 a.id
             ));
         }
@@ -442,4 +459,98 @@ pub fn startup_warnings(snap: &Snapshot) -> Vec<String> {
         }
     }
     w
+}
+
+/// 在配置文件里新增/更新一条 agent 记录（CLI `agents attach` 用）。
+///
+/// 多环境实例的 id 形如 `hermes@wsl:Ubuntu`、`hermes@win:yxf`，与本机的
+/// `hermes` 各占一条，配置与用量分开统计。
+///
+/// 硬约束：写回前重新校验整份配置，校验不过就**不落盘**（绝不写坏配置）。
+pub fn upsert_agent(
+    path: &std::path::Path,
+    id: &str,
+    default_group: &str,
+    adapter: &str,
+) -> Result<(), String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("读取配置 {} 失败: {e}", path.display()))?;
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(&text)
+        .map_err(|e| format!("解析配置 {} 失败: {e}", path.display()))?;
+    {
+        let root = doc
+            .as_mapping_mut()
+            .ok_or_else(|| "配置根节点不是映射".to_string())?;
+        let agents = root
+            .entry(serde_yaml::Value::String("agents".into()))
+            .or_insert_with(|| serde_yaml::Value::Sequence(Vec::new()));
+        let seq = agents
+            .as_sequence_mut()
+            .ok_or_else(|| "agents 不是序列".to_string())?;
+        let mut m = serde_yaml::Mapping::new();
+        m.insert(
+            serde_yaml::Value::String("id".into()),
+            serde_yaml::Value::String(id.to_string()),
+        );
+        m.insert(
+            serde_yaml::Value::String("default_group".into()),
+            serde_yaml::Value::String(default_group.to_string()),
+        );
+        if !adapter.trim().is_empty() {
+            m.insert(
+                serde_yaml::Value::String("adapter".into()),
+                serde_yaml::Value::String(adapter.trim().to_string()),
+            );
+        }
+        match seq.iter_mut().find(|a| {
+            a.get("id")
+                .and_then(|v| v.as_str())
+                .map(|s| s == id)
+                .unwrap_or(false)
+        }) {
+            Some(a) => *a = serde_yaml::Value::Mapping(m),
+            None => seq.push(serde_yaml::Value::Mapping(m)),
+        }
+    }
+    let out = serde_yaml::to_string(&doc).map_err(|e| format!("序列化配置失败: {e}"))?;
+    let filename = path.display().to_string();
+    if let Err(errs) = load_str(&out, &filename) {
+        return Err(format!("新配置未通过校验，已放弃写入：{}", errs.join("；")));
+    }
+    std::fs::write(path, out).map_err(|e| format!("写入配置 {} 失败: {e}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const YAML: &str = r#"
+gateway:
+  addr: "127.0.0.1:3425"
+  ui_addr: "127.0.0.1:3426"
+providers:
+  - { id: p1, vendor: mock, base_url: "http://127.0.0.1:1/v1", api_key_env: K1, models: [m1], allow_private: true }
+routing_groups:
+  - name: bbb
+    strategy: order
+    members: [{ provider: p1, model: m1, priority: 1 }]
+  - name: aaa
+    strategy: order
+    members: [{ provider: p1, model: m1, priority: 1 }]
+agents:
+  - { id: codex, default_group: bbb }
+"#;
+
+    /// 已登记的实例用它自己的默认组；未登记的用第一个组（按名排序）。
+    ///
+    /// 检测与巡检必须用同一套规则，否则会出现"检测说漂移、巡检说没漂移"。
+    #[test]
+    fn default_group_for_is_consistent() {
+        let snap = load_str(YAML, "t.yaml").expect("config ok");
+        assert_eq!(snap.default_group_for("codex"), "bbb");
+        // 未登记的多环境实例 → 第一个组（"aaa" < "bbb"）
+        assert_eq!(snap.default_group_for("hermes@wsl:Ubuntu"), "aaa");
+        assert_eq!(snap.default_group_for("hermes@wsl:Ubuntu"), "aaa");
+    }
 }

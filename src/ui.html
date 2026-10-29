@@ -180,6 +180,11 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow .btn.ghost { flex: 0 0 auto; }
 .mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
+/* 运行环境分组：本机 / WSL 发行版 / Windows 侧，各自列出该环境里的 Agent */
+.envgrp { border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-bottom: 10px; }
+.envgrp-h { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.envgrp-h .chip.on { border-color: #2b4a76; }
+.envgrp .mrow:last-child { margin-bottom: 0; }
 .gcard .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 #gl-tip { position: fixed; z-index: 99999; display: none; pointer-events: none; background: #1f2b45; color: var(--fg); border: 1px solid #354564; padding: 5px 10px; border-radius: 7px; font-size: 12px; line-height: 1.5; max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 .fc { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--dim2); }
@@ -276,7 +281,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
         </div>
         <div class="panel" style="padding:4px 10px;overflow-x:auto">
           <table><thead><tr>
-            <th>Agent</th><th data-i18n="ag.adapter"></th><th data-i18n="col.status"></th>
+            <th>Agent</th><th data-i18n="ag.env"></th><th data-i18n="ag.adapter"></th><th data-i18n="col.status"></th>
             <th data-i18n="ag.defgroup"></th><th data-i18n="ag.models"></th><th data-i18n="col.ops"></th>
           </tr></thead><tbody id="ag-rows"></tbody></table>
         </div>
@@ -375,8 +380,8 @@ const I18N = {
     "rt.quickAdd": "＋ 成员", "rt.disable": "禁用", "rt.enable": "启用", "rt.del": "删除成员",
     "ag.adapter": "适配器", "ag.adAuto": "自动（按 ID 推断）", "ag.repair": "一键修复",
     "ag.add": "新增 Agent", "ag.hint": "一键接入自动改写工具配置，还原时逐字节回滚",
-    "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.models": "使用模型",
-    "ag.detect": "本机 Agent 检测", "ag.detectHint": "自动识别本机已安装的编程 Agent，一键接入网关",
+    "ag.adapter": "适配器", "ag.defgroup": "默认组", "ag.models": "使用模型", "ag.env": "运行环境",
+    "ag.detect": "Agent 检测（多环境）", "ag.detectHint": "自动识别本机与其它环境（本机 / WSL 发行版 / Windows 侧）已安装的编程 Agent，一键接入网关",
     "st.gateway": "网关", "st.gatewayHint": "监听地址修改后需重启进程才会生效",
     "st.addr": "网关监听地址（API）", "st.uiAddr": "控制台监听地址（UI）",
     "st.retain": "日志保留天数", "st.expose": "将路由组暴露为 group/ 虚拟模型",
@@ -408,8 +413,8 @@ const I18N = {
     "rt.quickAdd": "＋ Member", "rt.disable": "Disable", "rt.enable": "Enable", "rt.del": "Remove member",
     "ag.adapter": "Adapter", "ag.adAuto": "Auto (by ID)", "ag.repair": "Repair",
     "ag.add": "New agent", "ag.hint": "Attach rewrites tool configs in one click; restore rolls back byte-for-byte",
-    "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.models": "Models",
-    "ag.detect": "Detected local agents", "ag.detectHint": "Coding tools found on this machine, attach in one click",
+    "ag.adapter": "Adapter", "ag.defgroup": "Default group", "ag.models": "Models", "ag.env": "Environment",
+    "ag.detect": "Detected agents (multi-environment)", "ag.detectHint": "Coding tools found on this machine and other environments (native / WSL distro / Windows side), attach in one click",
     "st.gateway": "Gateway", "st.gatewayHint": "Changing listen addresses requires a process restart",
     "st.addr": "Gateway listen address (API)", "st.uiAddr": "Console listen address (UI)",
     "st.retain": "Log retention days", "st.expose": "Expose routing groups as group/ virtual models",
@@ -1207,6 +1212,7 @@ async function loadAgents() {
       const stx = a.attached ? (a.drifted ? L("已接入·漂移", "attached·drifted") : L("已接入", "attached")) : L("未接入", "detached");
       return `<tr>
         <td><b>${esc(a.agent_id)}</b>${a.display_name ? ` <span class="muted">${esc(a.display_name)}</span>` : ""}</td>
+        <td><span class="chip">${esc(a.scope_label || L("本机", "native"))}</span></td>
         <td><span class="chip">${esc(a.adapter)}</span></td>
         <td><span class="pill ${stp}"><i></i>${esc(stx)}</span>${a.note ? `<div class="muted">${esc(a.note)}</div>` : ""}</td>
         <td><code>${esc(a.default_group || "-")}</code></td>
@@ -1218,28 +1224,53 @@ async function loadAgents() {
           <button class="btn sm danger" onclick="delAgent('${esc(a.agent_id)}')">${esc(L("删除", "Delete"))}</button>
         </td></tr>`;
     }).join("")
-      || `<tr><td colspan="6"><div class="empty"><div class="big">🤖</div><b>${esc(L("还没有 Agent", "No agents yet"))}</b>${esc(L("Agent 是接入网关的编程助手（opencode / codex / hermes …），新增后一键改写其本地配置", "An agent is a coding tool routed through the gateway. Add one, then attach it in a click"))}</div></td></tr>`;
+      || `<tr><td colspan="7"><div class="empty"><div class="big">🤖</div><b>${esc(L("还没有 Agent", "No agents yet"))}</b>${esc(L("Agent 是接入网关的编程助手（opencode / codex / hermes …），新增后一键改写其本地配置", "An agent is a coding tool routed through the gateway. Add one, then attach it in a click"))}</div></td></tr>`;
     return true;
   } catch (err) { toast(err.message, "bad"); return false; }
 }
 async function loadDetect() {
   try {
-    const list = await api("/api/agents/detect");
-    const fresh = list.filter(d => !d.in_config);
+    const resp = await api("/api/agents/detect");
+    // 后端按运行环境分组返回 {scopes:[...], agents:[...]}：
+    // 本机的 hermes 与 WSL 里的 hermmes@wsl:Ubuntu 是两个独立条目，各自带快捷接入。
+    const scopes = resp.scopes || [];
+    const all = resp.agents || [];
+    // 已在配置里的实例不再重复提示；但"已接入·漂移"需要露出重接入口，故保留。
+    const fresh = all.filter(d => !d.in_config || d.drifted);
     $("ag-detect").style.display = fresh.length ? "" : "none";
-    $("ag-det-list").innerHTML = fresh.map(d => {
-      const canAttach = d.installed && ["opencode", "codex", "hermes"].includes(d.adapter);
-      const stx = d.installed
-        ? `<span class="pill on"><i></i>${esc(L("已检测到", "detected"))}</span>`
-        : `<span class="pill dim"><i></i>${esc(L("未安装", "not installed"))}</span>`;
-      return `<div class="mrow"><span class="chip">${esc(d.adapter)}</span><b>${esc(d.agent_id)}</b>${stx}
-        <span class="muted" style="flex:1;min-width:120px;word-break:break-all">${esc(d.config_path || "")}${d.note ? " · " + esc(d.note) : ""}</span>
-        ${canAttach ? `<button class="btn sm primary" onclick="quickAttach('${esc(d.agent_id)}')">${esc(L("快速接入", "Quick attach"))}</button>` : ""}</div>`;
-    }).join("");
+    if (!fresh.length) { $("ag-det-list").innerHTML = ""; return; }
+
+    const block = (sc) => {
+      const items = fresh.filter(d => d.scope_id === sc.id);
+      if (!items.length) return "";
+      const rows = items.map(d => {
+        const canAttach = d.installed && ["opencode", "codex", "hermes"].includes(d.adapter);
+        // 状态分三态：已接入·漂移（需重接）/ 已接入 / 已检测到（未接入）
+        const stp = d.drifted ? "warn" : (d.attached ? "on" : "dim");
+        const stx = d.drifted
+          ? L("已接入·漂移", "attached·drifted")
+          : (d.attached ? L("已接入", "attached") : L("已检测到", "detected"));
+        const btn = d.drifted
+          ? `<button class="btn sm primary" onclick="quickAttach('${esc(d.agent_id)}','${esc(d.adapter)}')">${esc(L("重新接入", "Re-attach"))}</button>`
+          : (canAttach ? `<button class="btn sm primary" onclick="quickAttach('${esc(d.agent_id)}','${esc(d.adapter)}')">${esc(L("快速接入", "Quick attach"))}</button>` : "");
+        return `<div class="mrow"><span class="chip">${esc(d.adapter)}</span><b>${esc(d.agent_id)}</b><span class="pill ${stp}"><i></i>${esc(stx)}</span>
+          <span class="muted" style="flex:1;min-width:120px;word-break:break-all">${esc(d.config_path || "")}${d.note ? " · " + esc(d.note) : ""}</span>
+          ${btn}</div>`;
+      }).join("");
+      const note = sc.note ? `<div class="muted" style="margin-bottom:6px">${esc(sc.note)}</div>` : "";
+      return `<div class="envgrp">
+        <div class="envgrp-h"><span class="chip ${sc.kind === "native" ? "on" : ""}">${esc(sc.label)}</span>
+          <code class="muted">${esc(sc.id)}</code></div>
+        ${note}${rows}</div>`;
+    };
+
+    // 未装任何 Agent 的环境不显示；分组按后端给定顺序（本机在前）
+    $("ag-det-list").innerHTML = scopes.map(block).join("")
+      || `<div class="muted">${esc(L("未检测到可接入的 Agent", "No attachable agents detected"))}</div>`;
     document.querySelectorAll("#ag-detect [data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
   } catch (e) { /* 检测失败不打扰主列表 */ }
 }
-async function quickAttach(id) {
+async function quickAttach(id, adapter) {
   if (!state.groups.length) state.groups = (await api("/api/routing")).groups || [];
   if (!state.groups.length) return toast(L("请先在「路由」创建至少一个路由组", "Create a routing group first"), "warn");
   const g = state.groups[0].name;
@@ -1247,7 +1278,7 @@ async function quickAttach(id) {
     L(`将创建 Agent ${id}（默认组 ${g}）并改写其本地配置：写入前自动备份，真实 Key 留在网关。确定？`,
       `Creates agent ${id} (default group ${g}) and rewrites its local config: backed up first, real keys stay in the gateway. Proceed?`))) return;
   try {
-    await post("/_admin/agent", { id, default_group: g });
+    await post("/_admin/agent", { id, default_group: g, adapter: adapter || "" });
     const r = await post("/api/agents/attach", { agent_id: id, group: g });
     toast(L("已接入 ", "Attached ") + id + (r.note ? " · " + r.note : ""), "ok");
   } catch (err) { toast(err.message, "bad"); }
