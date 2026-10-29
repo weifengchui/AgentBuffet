@@ -180,6 +180,20 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .mrow .btn.ghost { flex: 0 0 auto; }
 .mrow .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 .mrow.dragover { outline: 1px dashed #4f8cff; outline-offset: 2px; border-radius: 8px; }
+/* 可搜索下拉（模型列表）：输入框只管过滤，浮层固定定位以免被模态框滚动区裁切 */
+.cb { position: relative; display: block; flex: 1 1 40%; min-width: 0; }
+.cb input { width: 100%; padding-right: 24px; }
+.cb > .cb-ar { position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--dim); font-size: 9px; pointer-events: none; }
+.cb-pop { position: fixed; z-index: 300; display: none; background: var(--card);
+  border: 1px solid #263041; border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.55);
+  overflow-y: auto; padding: 4px 0; }
+.cb-pop.on { display: block; }
+.cb-opt { padding: 7px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; color: var(--dim2); }
+.cb-opt.sel { color: var(--accent2); }
+.cb-opt.hl { background: var(--active); color: var(--text); }
+.cb-empty { padding: 9px 12px; font-size: 12px; color: var(--dim); }
 /* ---------------- agents 接入器：双栏（左按环境分组实例列表 / 右详情与路由配置） ---------------- */
 .ag-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 16px; align-items: start; }
 .ag-left { padding: 14px 10px 10px; }
@@ -539,12 +553,13 @@ function toast(msg, type = "info") {
   setTimeout(() => d.remove(), 3900);
 }
 function openModal(title, body, foot) {
+  cbClose();
   $("modal-title").textContent = title;
   $("modal-body").innerHTML = body;
   $("modal-foot").innerHTML = foot;
   $("modal-mask").classList.add("on");
 }
-function closeModal() { $("modal-mask").classList.remove("on"); }
+function closeModal() { cbClose(); $("modal-mask").classList.remove("on"); }
 $("modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 function confirmM(title, msg) {
@@ -1047,19 +1062,30 @@ function quickAddMember(name) {
   if (!first) return toast(L("请先添加服务商", "Add a provider first"), "warn");
   openModal(t("rt.quickAdd") + " · " + name, `
     <label class="f"><span>${esc(t("col.provider"))}</span><select id="qa-p">${providerOpts(first.id)}</select></label>
-    <label class="f"><span>Model</span><span id="qa-mw"></span></label>`,
+    <label class="f"><span>Model</span><div id="qa-mw"></div></label>`,
     `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
      <button class="btn primary" id="qa-ok">${esc(L("添加", "Add"))}</button>`);
+  let qm = (first.models || [])[0] || "";
   const renderM = () => {
-    const ms = (state.providers.find(x => x.id === $("qa-p").value) || {}).models || [];
+    const pid = $("qa-p").value;
+    const ms = (state.providers.find(x => x.id === pid) || {}).models || [];
+    qm = ms.includes(qm) ? qm : (ms[0] || "");
     $("qa-mw").innerHTML = ms.length
-      ? `<select id="qa-m">${freeSort($("qa-p").value, ms).map(m => `<option value="${esc(m)}">${freeOpt($("qa-p").value, m)}</option>`).join("")}</select>`
-      : `<input id="qa-m" type="text" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
+      ? `<span class="cb"><input id="qa-m" type="text" value="${esc(qm)}" placeholder="${esc(cbModelLabel())}"><span class="cb-ar">▼</span></span>`
+      : `<input id="qa-m" type="text" value="${esc(qm)}" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
+    if (ms.length) {
+      cbAttach($("qa-m"),
+        freeSort(pid, ms).map(m => ({ value: m, label: freeOpt(pid, m) })),
+        (v) => { qm = v; },
+        () => qm);
+    } else {
+      $("qa-m").oninput = () => { qm = $("qa-m").value; };
+    }
   };
   $("qa-p").onchange = renderM; renderM();
   $("qa-ok").onclick = async () => {
     const g = state.groups.find(x => x.name === name); if (!g) return;
-    const model = String($("qa-m").value || "").trim();
+    const model = String(qm || "").trim();
     if (!model) return toast(L("模型不能为空", "Model required"), "warn");
     const ms = g.members.map(m => ({ provider: m.provider, model: m.model, priority: m.priority, disabled: !!m.disabled }));
     if (ms.some(m => m.provider === $("qa-p").value && m.model === model)) return toast(L("该成员已存在", "Member already exists"), "warn");
@@ -1103,12 +1129,103 @@ let gm = [];
 function providerOpts(sel) {
   return state.providers.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""}>${esc(p.id)} (${esc(p.vendor)})</option>`).join("");
 }
+
+// ---------------- 可搜索下拉（服务商模型列表太长时靠输入过滤） ----------------
+// 输入框只做过滤与展示，真正提交的值仍是列表里的某一项；浮层挂在 body 上
+// 用 fixed 定位，避免被模态框的滚动区裁切。
+const cbModelLabel = () => L("搜索或选择模型", "Search or pick a model");
+let cbPop = null, cbOwner = null, cbList = [], cbHl = -1, cbOnPick = null;
+function cbEnsure() {
+  if (cbPop) return cbPop;
+  cbPop = document.createElement("div");
+  cbPop.className = "cb-pop";
+  document.body.appendChild(cbPop);
+  document.addEventListener("mousedown", (e) => {
+    if (!cbOwner || cbPop.contains(e.target) || cbOwner.contains(e.target)) return;
+    cbClose();
+  }, true);
+  document.addEventListener("scroll", () => cbClose(), true);
+  window.addEventListener("resize", () => cbClose());
+  return cbPop;
+}
+function cbClose() {
+  if (cbPop) { cbPop.classList.remove("on"); cbPop.innerHTML = ""; }
+  cbOwner = null; cbList = []; cbHl = -1; cbOnPick = null;
+}
+function cbMark() {
+  if (!cbPop) return;
+  cbPop.querySelectorAll(".cb-opt").forEach(o => o.classList.toggle("hl", +o.dataset.i === cbHl));
+  const cur = cbPop.querySelector(".cb-opt.hl");
+  if (cur) cur.scrollIntoView({ block: "nearest" });
+}
+function cbShow(el, items, q) {
+  const pop = cbEnsure();
+  const s = q.trim().toLowerCase();
+  cbList = s ? items.filter(x => x.value.toLowerCase().includes(s) || x.label.toLowerCase().includes(s)) : items.slice();
+  cbHl = cbList.findIndex(x => x.value === el.value);
+  if (cbHl < 0) cbHl = cbList.length ? 0 : -1;
+  const cur = el.value;
+  pop.innerHTML = cbList.length
+    ? cbList.map((x, i) => `<div class="cb-opt${i === cbHl ? " hl" : ""}${x.value === cur ? " sel" : ""}" data-i="${i}">${esc(x.label)}</div>`).join("")
+    : `<div class="cb-empty">${esc(L("无匹配模型", "No matching models"))}</div>`;
+  const r = el.getBoundingClientRect();
+  pop.style.left = r.left + "px";
+  pop.style.top = (r.bottom + 4) + "px";
+  pop.style.width = Math.max(r.width, 220) + "px";
+  pop.style.maxHeight = Math.max(80, Math.min(236, window.innerHeight - r.bottom - 12)) + "px";
+  pop.classList.add("on");
+  cbOwner = el;
+  pop.querySelectorAll(".cb-opt").forEach(o => {
+    o.onmousedown = (e) => e.preventDefault(); // 保住输入框焦点，选项才能收到 click
+    o.onmouseenter = () => { cbHl = +o.dataset.i; cbMark(); };
+    o.onclick = () => {
+      const it = cbList[+o.dataset.i], pick = cbOnPick;
+      if (it) el.value = it.value;
+      cbClose();
+      if (it && pick) pick(it.value);
+    };
+  });
+  if (cbHl >= 0) cbMark();
+}
+function cbPick(i) {
+  const it = cbList[i >= 0 ? i : 0], pick = cbOnPick;
+  if (!it) return;
+  cbOwner.value = it.value;
+  cbClose();
+  pick(it.value);
+}
+/** 给输入框挂可搜索下拉：items=[{value,label}]，onPick(选中的 value)，getCommitted() 取已提交值。 */
+function cbAttach(el, items, onPick, getCommitted) {
+  el.setAttribute("autocomplete", "off");
+  el.onfocus = () => { cbOnPick = onPick; cbShow(el, items, ""); };
+  el.oninput = () => { cbOnPick = onPick; cbShow(el, items, el.value); };
+  el.onblur = () => {
+    if (cbOwner === el) cbClose();
+    el.value = getCommitted(); // 输入框不接受半截关键字，失焦回到已提交的模型名
+  };
+  el.onkeydown = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (cbOwner !== el) { cbOnPick = onPick; cbShow(el, items, el.value); return; }
+      if (!cbList.length) return;
+      cbHl = (cbHl + (e.key === "ArrowDown" ? 1 : cbList.length - 1)) % cbList.length;
+      cbMark();
+    } else if (e.key === "Enter") {
+      if (cbOwner === el && cbList.length) { e.preventDefault(); cbPick(cbHl); }
+    } else if (e.key === "Escape") {
+      if (cbOwner === el) { e.stopPropagation(); cbClose(); el.value = getCommitted(); }
+    } else if (e.key === "Tab") {
+      if (cbOwner === el) cbClose(); // 失焦时 onblur 会把半截关键字还原成已提交值
+    }
+  };
+}
+
 function renderMembers() {
   $("gm-list").innerHTML = gm.map((r, i) => {
     const p = state.providers.find(x => x.id === r.provider);
     const ms = (p && p.models) || [];
     const modelCell = ms.length
-      ? `<select class="mm" data-i="${i}" data-f="model">${freeSort(r.provider, ms).map(m => `<option value="${esc(m)}" ${m === r.model ? "selected" : ""}>${freeOpt(r.provider, m)}</option>`).join("")}</select>`
+      ? `<span class="cb"><input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}" placeholder="${esc(cbModelLabel())}"><span class="cb-ar">▼</span></span>`
       : `<input class="mm" data-i="${i}" data-f="model" type="text" value="${esc(r.model)}" placeholder="${esc(L("输入模型名（该服务商未预置模型）", "Enter model name (no preset models)"))}">`;
     return `<div class="mrow" data-i="${i}"><span class="grip" draggable="true" title="${esc(L("拖动排序", "Drag to reorder"))}">⠿</span>
       <span class="chip">#${i + 1}</span>
@@ -1117,6 +1234,7 @@ function renderMembers() {
       <button class="btn sm danger" data-act="rm" data-i="${i}">✕</button></div>`;
   }).join("");
   $("gm-list").querySelectorAll("select,input").forEach(el => {
+    if (el.closest(".cb")) return; // 可搜索下拉单独绑定（输入只用于过滤，不直接提交）
     el.onchange = () => {
       const row = gm[+el.dataset.i];
       row[el.dataset.f] = el.value;
@@ -1127,6 +1245,15 @@ function renderMembers() {
       }
     };
     if (el.tagName === "INPUT") el.oninput = el.onchange;
+  });
+  $("gm-list").querySelectorAll(".cb input").forEach(el => {
+    const i = +el.dataset.i;
+    const pid = gm[i].provider;
+    const ms = (state.providers.find(x => x.id === pid) || {}).models || [];
+    cbAttach(el,
+      freeSort(pid, ms).map(m => ({ value: m, label: freeOpt(pid, m) })),
+      (v) => { gm[i].model = v; },
+      () => gm[i].model);
   });
   let dragI = null;
   $("gm-list").querySelectorAll(".grip").forEach(el => {
