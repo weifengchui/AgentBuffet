@@ -688,7 +688,7 @@ function drawMap(agents, groups, providers, recent) {
     const nm = a.agent_id.length > 11 ? a.agent_id.slice(0, 10) + "…" : a.agent_id;
     h += `<g><rect x="${p.x-54}" y="${p.y-13}" width="108" height="26" rx="13" fill="#13233a" stroke="${col}" stroke-width="1.2"${a.drifted ? ' stroke-dasharray="4 3"' : ""}/>
       <text x="${p.x}" y="${p.y+4}" text-anchor="middle" fill="#dcecf8" font-size="11.5">${esc(nm)}</text>
-      <title>${esc(a.agent_id)} · ${esc(a.default_group || "-")}${a.drifted ? " · " + esc(L("漂移", "drifted")) : ""}</title></g>`;
+      <title>${esc(a.agent_id)} · ${esc(a.default_group || "-")}${a.other_gateway ? " · " + esc(L("被他网关占用", "other gateway")) : a.drifted ? " · " + esc(L("漂移", "drifted")) : ""}</title></g>`;
   }
   for (const q of pvs) {
     const p = pos["pv:" + q.id], col = pcol[q.id], scol = PCOL[q.status] || "#50607a";
@@ -1224,6 +1224,7 @@ function agSel() {
 function selAgent(id) { state.selAgent = id; drawAgents(); }
 function agStatus(x) {
   if (!AG_ATTACHABLE.includes(x.adapter)) return ["dim", L("不支持", "unsupported")];
+  if (x.other_gateway) return ["warn", L("被他网关占用", "other gateway")];
   if (x.drifted) return ["warn", L("漂移", "drifted")];
   if (x.attached) return ["on", L("已接入", "attached")];
   return ["dim", L("未接入", "detached")];

@@ -118,6 +118,79 @@ impl Target {
     }
 }
 
+/// URL 的 host:port（去掉 scheme 与路径）。
+fn url_hostport(u: &str) -> Option<String> {
+    let rest = u
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let hp = rest.split('/').next()?;
+    if hp.is_empty() || !hp.contains(':') {
+        return None;
+    }
+    Some(hp.to_string())
+}
+
+/// 探测 base_url 指向的是不是一个活着的 AgentBuffet 网关。
+///
+/// 只发一次 `GET /v1/models`（Connection: close，500ms 超时），
+/// 响应里出现 `agentbuffet` 即认为是本网关家族。
+fn probe_agentbuffet(base_url: &str) -> bool {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+    let Some(hp) = url_hostport(base_url) else {
+        return false;
+    };
+    let Ok(Some(sa)) = hp.to_socket_addrs().map(|mut i| i.next()) else {
+        return false;
+    };
+    let to = Duration::from_millis(500);
+    let Ok(mut s) = TcpStream::connect_timeout(&sa, to) else {
+        return false;
+    };
+    let _ = s.set_write_timeout(Some(to));
+    let _ = s.set_read_timeout(Some(to));
+    let req = format!("GET /v1/models HTTP/1.1\r\nHost: {hp}\r\nConnection: close\r\n\r\n");
+    if s.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut got = Vec::new();
+    let mut buf = [0u8; 4096];
+    for _ in 0..4 {
+        match s.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                got.extend_from_slice(&buf[..n]);
+                if n < buf.len() {
+                    break;
+                }
+            }
+        }
+    }
+    String::from_utf8_lossy(&got).contains(PROVIDER_NAME)
+}
+
+/// 文件里当前的网关地址与本网关期望地址不一致、且该地址确实是一个
+/// 运行中的 AgentBuffet 网关时，返回那个 URL（视为"被别的网关占用"）。
+///
+/// 背景：两个网关同时登记同一个 Agent 时，各自的 30s 漂移巡检会互相
+/// 覆盖注入文件里的 base_url，表现为"永远在漂移、永远在修复"。
+/// 被占用时巡检让位（只提示不改写），显式 attach 仍可抢回。
+fn held_by_other(file_url: Option<String>, target: &Target) -> Option<String> {
+    let u = file_url?;
+    let (a, b) = (url_hostport(&u)?, url_hostport(&target.base_url())?);
+    if a == b {
+        return None;
+    }
+    probe_agentbuffet(&u).then_some(u)
+}
+
+/// 被其他网关占用时的统一提示文案。
+fn other_gw_note(url: &str) -> String {
+    format!("当前已接入其他网关（{url}），巡检不再自动改写；重新 attach 可抢回")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Adapter {
     OpenCode,
@@ -245,6 +318,9 @@ pub struct AgentStatus {
     pub installed: bool,
     pub attached: bool,
     pub drifted: bool,
+    /// 漂移且文件地址指向另一个运行中的 AgentBuffet 网关时，记录那个 URL；
+    /// 巡检据此让位，不再自动改写（显式 attach 可抢回）。
+    pub other_gateway: Option<String>,
     pub note: String,
 }
 
@@ -263,6 +339,9 @@ pub struct DetectedAgent {
     pub installed: bool,
     pub attached: bool,
     pub drifted: bool,
+    /// 漂移且文件地址指向另一个运行中的 AgentBuffet 网关时，记录那个 URL；
+    /// 巡检据此让位，不再自动改写（显式 attach 可抢回）。
+    pub other_gateway: Option<String>,
     pub note: String,
 }
 
@@ -310,6 +389,7 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
         installed: false,
         attached: false,
         drifted: false,
+        other_gateway: None,
         note: String::new(),
     };
     if scope::scope_of(&target.agent_id) != scope::NATIVE && sc.is_none() {
@@ -338,7 +418,15 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
             s.attached = oc_has_ours(&doc, target);
             s.drifted = s.attached && oc_drifted(&doc, target);
             if s.drifted {
-                s.note = "已接入但配置与当前网关不一致（漂移），重新 attach 可修复".into();
+                let file_url = doc
+                    .pointer(&format!("/provider/{PROVIDER_NAME}/options/baseURL"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                s.other_gateway = held_by_other(file_url, target);
+                s.note = match &s.other_gateway {
+                    Some(u) => other_gw_note(u),
+                    None => "已接入但配置与当前网关不一致（漂移），重新 attach 可修复".into(),
+                };
             }
         }
         Adapter::Codex => {
@@ -355,7 +443,17 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
             s.attached = cx_has_ours(&text, &parsed, target);
             s.drifted = s.attached && cx_drifted(&text, &parsed, target);
             if s.drifted {
-                s.note = "已接入但注入块与当前网关不一致（漂移），重新 attach 可修复".into();
+                let file_url = parsed
+                    .get("model_providers")
+                    .and_then(|m| m.get(PROVIDER_NAME))
+                    .and_then(|p| p.get("base_url"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                s.other_gateway = held_by_other(file_url, target);
+                s.note = match &s.other_gateway {
+                    Some(u) => other_gw_note(u),
+                    None => "已接入但注入块与当前网关不一致（漂移），重新 attach 可修复".into(),
+                };
             }
         }
         Adapter::Hermes => {
@@ -370,11 +468,18 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
             if let Ok(text) = std::fs::read_to_string(&p) {
                 s.attached = hm_has_ours(&text);
                 s.drifted = s.attached && hm_drifted(&text, target);
+                if s.drifted {
+                    let lines: Vec<&str> = text.lines().collect();
+                    let file_url = hm_get(&lines, "base_url");
+                    s.other_gateway = held_by_other(file_url, target);
+                }
             }
-            s.note = if s.drifted {
-                "已接入但 base_url 与当前网关不一致（漂移），重新 attach 可修复".into()
-            } else {
-                locs.join("；")
+            s.note = match &s.other_gateway {
+                Some(u) => other_gw_note(u),
+                None if s.drifted => {
+                    "已接入但 base_url 与当前网关不一致（漂移），重新 attach 可修复".into()
+                }
+                None => locs.join("；"),
             };
         }
     }
@@ -421,6 +526,7 @@ pub fn detect_all(home: &Path, snap: &crate::config::Snapshot) -> Vec<DetectedAg
                 installed: st.installed,
                 attached: st.attached,
                 drifted: st.drifted,
+                other_gateway: st.other_gateway,
                 note: st.note,
             });
         }
@@ -1709,5 +1815,122 @@ agents:
         );
         assert_eq!(text.matches("hermes@wsl:Ubuntu-24.04").count(), 1, "{text}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ------------------------------------------------------------ 被他网关占用
+
+    /// 假 AgentBuffet 网关：随机端口，任意请求都回含 "agentbuffet" 的 JSON。
+    fn fake_gateway() -> std::net::SocketAddr {
+        use std::io::{Read, Write};
+        let lst = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = lst.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in lst.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = [0u8; 512];
+                let _ = s.read(&mut buf);
+                let body = r#"{"data":[{"id":"agentbuffet/default"}]}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = s.write_all(resp.as_bytes());
+                let _ = s.flush();
+            }
+        });
+        addr
+    }
+
+    /// 一个确定没人监听的本地端口（bind 后立即释放）。
+    fn dead_addr() -> std::net::SocketAddr {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap()
+    }
+
+    #[test]
+    fn url_hostport_parses_host_and_port() {
+        assert_eq!(
+            url_hostport("http://127.0.0.1:3427/hermes/v1").as_deref(),
+            Some("127.0.0.1:3427")
+        );
+        assert_eq!(
+            url_hostport(" https://example.org:8443/x ").as_deref(),
+            Some("example.org:8443")
+        );
+        assert_eq!(url_hostport("http://127.0.0.1:3427").as_deref(), Some("127.0.0.1:3427"));
+        assert_eq!(url_hostport("http://127.0.0.1/v1"), None, "无端口不解析");
+        assert_eq!(url_hostport("garbage"), None);
+    }
+
+    #[test]
+    fn probe_detects_fake_gateway_and_ignores_dead_port() {
+        let addr = fake_gateway();
+        assert!(probe_agentbuffet(&format!("http://{addr}/hermes/v1")));
+        let dead = dead_addr();
+        assert!(!probe_agentbuffet(&format!("http://{dead}/hermes/v1")));
+        assert!(!probe_agentbuffet("not-a-url"));
+    }
+
+    #[test]
+    fn held_by_other_only_reports_live_foreign_gateway() {
+        let addr = fake_gateway();
+        let target = hermes_target("hermes"); // base_url → 127.0.0.1:3425
+        // 同址：不探测、不让位
+        assert_eq!(
+            held_by_other(Some("http://127.0.0.1:3425/hermes/v1".into()), &target),
+            None
+        );
+        // 异址但无人监听：普通漂移，不让位
+        let dead = dead_addr();
+        assert_eq!(
+            held_by_other(Some(format!("http://{dead}/hermes/v1")), &target),
+            None
+        );
+        // 异址且确实活着一个 AgentBuffet 网关：占用
+        let u = format!("http://{addr}/hermes/v1");
+        assert_eq!(held_by_other(Some(u.clone()), &target), Some(u));
+    }
+
+    /// 漂移 + 文件地址指向运行中的其他网关 → 判"被他网关占用"，
+    /// other_gateway 有值、note 提示巡检让位。
+    #[test]
+    fn detect_hermes_drift_to_other_gateway_marks_held() {
+        enable_isolation_for_tests();
+        let addr = fake_gateway();
+        let home = tmp_home("held-hm");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        let url = format!("http://{addr}/hermes/v1");
+        std::fs::write(&cfg, format!("model:\n  provider: agentbuffet\n  base_url: \"{url}\"\n"))
+            .unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(s.attached, "{:?}", s.note);
+        assert!(s.drifted);
+        assert_eq!(s.other_gateway.as_deref(), Some(url.as_str()), "{:?}", s.note);
+        assert!(s.note.contains("其他网关"), "{:?}", s.note);
+        assert!(s.note.contains("巡检不再自动改写"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 漂移 + 文件地址不可达 → 仍是普通漂移提示，other_gateway 为空（巡检照修）。
+    #[test]
+    fn detect_hermes_drift_to_dead_addr_is_plain_drift() {
+        enable_isolation_for_tests();
+        let dead = dead_addr();
+        let home = tmp_home("plain-hm");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &cfg,
+            format!("model:\n  provider: agentbuffet\n  base_url: \"http://{dead}/hermes/v1\"\n"),
+        )
+        .unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(s.attached);
+        assert!(s.drifted);
+        assert_eq!(s.other_gateway, None);
+        assert!(s.note.contains("漂移"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

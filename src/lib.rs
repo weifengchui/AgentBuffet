@@ -554,8 +554,14 @@ pub async fn repair_drifted(st: &proxy::AppState) -> Vec<String> {
             adapter,
         };
         let d = onboard::detect(&st.home, &target);
-        if d.attached && d.drifted && onboard::apply(&st.home, &target).is_ok() {
-            refreshed.push(id);
+        if d.attached && d.drifted {
+            // 被另一个运行中的 AgentBuffet 网关占用：巡检让位，不改写，
+            // 否则两个网关互相覆盖 base_url，永远漂移-修复打架。
+            if let Some(u) = &d.other_gateway {
+                eprintln!("[drift] {id} 已接入其他网关（{u}），跳过自动修复");
+            } else if onboard::apply(&st.home, &target).is_ok() {
+                refreshed.push(id);
+            }
         }
     }
     refreshed
