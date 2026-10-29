@@ -724,4 +724,46 @@ mod tests {
         assert_eq!(found[0].1, users.join("alice"));
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// scope id → home 的三态：native 直通、未知 scope 返回 None（绝不能
+    /// 悄悄回落到别的环境），ghost 与真实环境互不干扰。
+    #[test]
+    fn home_for_scope_native_and_ghost() {
+        let home = std::env::temp_dir().join(format!(
+            "buffet-scope-home-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert_eq!(home_for_scope(NATIVE, &home), Some(home.clone()));
+        assert_eq!(home_for_scope("wsl:GhostDistro42", &home), None);
+        assert_eq!(home_for_scope("win:nosuchuser42", &home), None);
+    }
+
+    #[test]
+    fn scope_by_id_hit_and_miss() {
+        let scopes = vec![native_scope(Path::new("/tmp/scope-by-id"))];
+        assert!(scope_by_id(&scopes, NATIVE).is_some());
+        assert!(scope_by_id(&scopes, "wsl:Ubuntu-99.99").is_none());
+    }
+
+    /// 环境查不到时，注入地址必须原样回退到网关监听地址，而不是拼出半截
+    /// host 或换端口。
+    #[test]
+    fn gateway_addr_for_ghost_scope_falls_back_untouched() {
+        let home = std::env::temp_dir().join(format!(
+            "buffet-gw-ghost-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert_eq!(
+            gateway_addr_for("hermes@wsl:GhostDistro42", "127.0.0.1:3425", &home),
+            "127.0.0.1:3425"
+        );
+    }
 }

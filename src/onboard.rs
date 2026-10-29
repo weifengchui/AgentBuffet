@@ -1362,4 +1362,76 @@ mod tests {
         let idx_table = out.find("[t]").unwrap();
         assert!(idx_model < idx_table);
     }
+
+    fn tmp_home(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "buffet-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn hermes_target(agent_id: &str) -> Target {
+        Target {
+            agent_id: agent_id.to_string(),
+            default_group: "g".to_string(),
+            groups: vec!["g".to_string()],
+            models: vec![],
+            gateway_addr: "127.0.0.1:3425".to_string(),
+            adapter: "hermes".to_string(),
+        }
+    }
+
+    /// native 实例：装在伪造 home 里的 Hermes 必须被识别，且 scope 字段为
+    /// native、配置路径落在该 home 下。
+    #[test]
+    fn detect_native_instance_from_fake_home() {
+        let home = tmp_home("det-native");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "base_url: http://127.0.0.1:3425/hermes/v1\n").unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(s.installed, "伪造 home 里的 hermes 应被识别");
+        assert_eq!(s.scope_id, crate::scope::NATIVE);
+        assert_eq!(s.scope_kind, "native");
+        let p = s.config_path.unwrap();
+        assert!(
+            p.ends_with(".hermes/config.yaml") || p.ends_with(".hermes\\config.yaml"),
+            "{p}"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 环境已消失（发行版停止/卸载）：detect 必须给出明确 note 且 installed=false，
+    /// 绝不能拿本机同名配置冒充实例。
+    #[test]
+    fn detect_unknown_scope_reports_missing_env() {
+        let home = tmp_home("det-ghost");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "base_url: http://x/v1\n").unwrap();
+        let s = detect(&home, &hermes_target("hermes@wsl:GhostDistro42"));
+        assert!(!s.installed);
+        assert!(s.note.contains("未找到该运行环境"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 未知 scope 的 home 解析必须回落到 native home（与 attach 拒绝写操作
+    /// 互补：读路径不炸，写路径在 apply 处把关）。
+    #[test]
+    fn resolve_home_unknown_scope_falls_back_to_native() {
+        let home = tmp_home("resolve-ghost");
+        assert_eq!(
+            resolve_home(&home, "hermes@wsl:GhostDistro42", "hermes"),
+            home
+        );
+        assert_eq!(resolve_home(&home, "hermes", "hermes"), home);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
