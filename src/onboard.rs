@@ -119,13 +119,17 @@ impl Target {
 }
 
 /// URL 的 host:port（去掉 scheme 与路径）。
+///
+/// 主机或端口缺一不可：`http://:3427/x` 这类残地址必须判为无效，
+/// 否则探测会去解析 `:3427` 并得出"没探测到"的错误结论。
 fn url_hostport(u: &str) -> Option<String> {
     let rest = u
         .trim()
         .trim_start_matches("http://")
         .trim_start_matches("https://");
     let hp = rest.split('/').next()?;
-    if hp.is_empty() || !hp.contains(':') {
+    let (host, port) = hp.rsplit_once(':')?;
+    if host.is_empty() || port.is_empty() {
         return None;
     }
     Some(hp.to_string())
@@ -133,8 +137,10 @@ fn url_hostport(u: &str) -> Option<String> {
 
 /// 探测 base_url 指向的是不是一个活着的 AgentBuffet 网关。
 ///
-/// 只发一次 `GET /v1/models`（Connection: close，500ms 超时），
-/// 响应里出现 `agentbuffet` 即认为是本网关家族。
+/// 只发一次 `GET /v1/models`（Connection: close，500ms 超时）。认出本网关家族的
+/// 指纹有两个：根路径的模型列表里 `owned_by: agentbuffet`，或根路径特有的
+/// `unidentified agent` 提示——后者保证用户关掉 `expose_groups_as_models`
+/// 后仍能认出自家网关（模型列表此时为空）。别家 OpenAI 兼容服务两者都不带。
 fn probe_agentbuffet(base_url: &str) -> bool {
     use std::io::{Read, Write};
     use std::net::{TcpStream, ToSocketAddrs};
@@ -168,7 +174,8 @@ fn probe_agentbuffet(base_url: &str) -> bool {
             }
         }
     }
-    String::from_utf8_lossy(&got).contains(PROVIDER_NAME)
+    let body = String::from_utf8_lossy(&got);
+    body.contains(PROVIDER_NAME) || body.contains("unidentified agent")
 }
 
 /// 文件里当前的网关地址与本网关期望地址不一致、且该地址确实是一个
@@ -1819,17 +1826,17 @@ agents:
 
     // ------------------------------------------------------------ 被他网关占用
 
-    /// 假 AgentBuffet 网关：随机端口，任意请求都回含 "agentbuffet" 的 JSON。
-    fn fake_gateway() -> std::net::SocketAddr {
+    /// 假 HTTP 服务：任意请求都回 200 + 固定响应体（模拟别家网关 / 别家 LLM 服务）。
+    fn fake_http_server(body: &str) -> std::net::SocketAddr {
         use std::io::{Read, Write};
         let lst = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = lst.local_addr().unwrap();
+        let body = body.to_string();
         std::thread::spawn(move || {
             for stream in lst.incoming() {
                 let Ok(mut s) = stream else { continue };
                 let mut buf = [0u8; 512];
                 let _ = s.read(&mut buf);
-                let body = r#"{"data":[{"id":"agentbuffet/default"}]}"#;
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
@@ -1842,10 +1849,75 @@ agents:
         addr
     }
 
+    /// 假 AgentBuffet 网关（模型列表带 group 模型，`owned_by: agentbuffet`）。
+    fn fake_gateway() -> std::net::SocketAddr {
+        fake_http_server(r#"{"object":"list","data":[{"id":"group/g","owned_by":"agentbuffet"}]}"#)
+    }
+
+    /// 关掉 `expose_groups_as_models` 的真网关：模型列表为空，只剩 note 指纹。
+    fn fake_gateway_no_groups() -> std::net::SocketAddr {
+        fake_http_server(
+            r#"{"object":"list","data":[],"note":"unidentified agent; use /<agent>/v1/models for default-group models"}"#,
+        )
+    }
+
+    /// 别家的 OpenAI 兼容服务（LM Studio / ollama / 真 OpenAI）。
+    fn fake_plain_llm() -> std::net::SocketAddr {
+        fake_http_server(
+            r#"{"object":"list","data":[{"id":"gpt-4o","object":"model","owned_by":"openai"}]}"#,
+        )
+    }
+
+    /// 接上就关、一个字都不回的服务。
+    fn close_immediately_server() -> std::net::SocketAddr {
+        let lst = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = lst.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in lst.incoming() {
+                drop(stream);
+            }
+        });
+        addr
+    }
+
+    /// 接上但永远不回话的服务（探测必须有超时，不能把巡检线程挂住）。
+    fn silent_server() -> std::net::SocketAddr {
+        let lst = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = lst.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in lst.incoming() {
+                if let Ok(s) = stream {
+                    held.push(s);
+                }
+            }
+        });
+        addr
+    }
+
     /// 一个确定没人监听的本地端口（bind 后立即释放）。
     fn dead_addr() -> std::net::SocketAddr {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap()
+    }
+
+    /// 保持存活但不提供任何服务的监听地址：用作"本网关地址"，
+    /// 避免端口被别的测试复用导致偶发失败。
+    fn reserved_addr() -> (std::net::TcpListener, String) {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let a = l.local_addr().unwrap().to_string();
+        (l, a)
+    }
+
+    fn target_at(agent_id: &str, adapter: &str, gw: &str) -> Target {
+        Target {
+            agent_id: agent_id.to_string(),
+            default_group: "g".to_string(),
+            groups: vec!["g".to_string()],
+            models: vec![],
+            gateway_addr: gw.to_string(),
+            adapter: adapter.to_string(),
+        }
     }
 
     #[test]
@@ -1864,12 +1936,69 @@ agents:
     }
 
     #[test]
+    fn url_hostport_edge_cases() {
+        // 尾斜杠、无路径、空白包裹（config 里粘贴带空格/换行的地址很常见）
+        assert_eq!(url_hostport("http://127.0.0.1:3427/").as_deref(), Some("127.0.0.1:3427"));
+        assert_eq!(
+            url_hostport("\thttp://127.0.0.1:3427/x \n").as_deref(),
+            Some("127.0.0.1:3427")
+        );
+        // IPv6 字面量：方括号原样保留，交给 to_socket_addrs 解析
+        assert_eq!(url_hostport("http://[::1]:3425/x").as_deref(), Some("[::1]:3425"));
+        // 主机或端口缺失 → None（否则会去解析 ":3427" 这种残地址）
+        assert_eq!(url_hostport("http://:3427/x"), None, "缺主机的残地址");
+        assert_eq!(url_hostport("http://127.0.0.1:/x"), None, "缺端口的残地址");
+        assert_eq!(url_hostport(""), None);
+        assert_eq!(url_hostport("   "), None);
+        assert_eq!(url_hostport("http://"), None);
+    }
+
+    #[test]
     fn probe_detects_fake_gateway_and_ignores_dead_port() {
         let addr = fake_gateway();
         assert!(probe_agentbuffet(&format!("http://{addr}/hermes/v1")));
         let dead = dead_addr();
         assert!(!probe_agentbuffet(&format!("http://{dead}/hermes/v1")));
         assert!(!probe_agentbuffet("not-a-url"));
+    }
+
+    /// 认出本网关的两个指纹都要覆盖；别家 OpenAI 兼容服务绝不能被认成本网关。
+    #[test]
+    fn probe_distinguishes_own_gateway_from_other_services() {
+        let gw = fake_gateway();
+        assert!(
+            probe_agentbuffet(&format!("http://{gw}/hermes/v1")),
+            "暴露 group 模型的网关应被认出"
+        );
+        let gw_no_groups = fake_gateway_no_groups();
+        assert!(
+            probe_agentbuffet(&format!("http://{gw_no_groups}/hermes/v1")),
+            "关掉 expose_groups_as_models 后模型列表为空，仍应靠 note 指纹认出"
+        );
+        let llm = fake_plain_llm();
+        assert!(
+            !probe_agentbuffet(&format!("http://{llm}/hermes/v1")),
+            "别家 LLM 服务不能误判成 AgentBuffet 网关"
+        );
+    }
+
+    /// 对端异常（接上就关 / 不回话 / 残地址）必须安全返回 false，且有超时上限。
+    #[test]
+    fn probe_is_safe_against_broken_peers() {
+        let close = close_immediately_server();
+        assert!(!probe_agentbuffet(&format!("http://{close}/hermes/v1")));
+
+        let mute = silent_server();
+        let t0 = std::time::Instant::now();
+        assert!(!probe_agentbuffet(&format!("http://{mute}/hermes/v1")));
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(3),
+            "探测必须有界（巡检不能被挂住），实际耗时 {:?}",
+            t0.elapsed()
+        );
+
+        assert!(!probe_agentbuffet("http://:3427/x"), "残地址不探测");
+        assert!(!probe_agentbuffet(""), "空地址不探测");
     }
 
     #[test]
@@ -1890,6 +2019,54 @@ agents:
         // 异址且确实活着一个 AgentBuffet 网关：占用
         let u = format!("http://{addr}/hermes/v1");
         assert_eq!(held_by_other(Some(u.clone()), &target), Some(u));
+    }
+
+    /// 安全边界：文件指向别家（活着的）LLM 服务时不能让位——否则巡检永远
+    /// 修不回来，用户会被卡在一个第三方服务上。
+    #[test]
+    fn held_by_other_never_yields_to_non_gateway_services() {
+        let llm = fake_plain_llm();
+        let target = hermes_target("hermes");
+        assert_eq!(
+            held_by_other(Some(format!("http://{llm}/hermes/v1")), &target),
+            None
+        );
+    }
+
+    #[test]
+    fn held_by_other_trivial_inputs_are_none() {
+        let target = hermes_target("hermes");
+        for u in [
+            None,
+            Some(String::new()),
+            Some("   ".to_string()),
+            Some("nonsense".to_string()),
+            Some("http://:3425/x".to_string()),
+        ] {
+            assert_eq!(held_by_other(u.clone(), &target), None, "{u:?}");
+        }
+    }
+
+    /// host:port 相同即同一个网关：路径（不同 agent 前缀）、scheme、空白差异
+    /// 都不该被判成"被别的网关占用"。
+    #[test]
+    fn held_by_other_same_hostport_is_not_occupancy() {
+        let target = hermes_target("hermes"); // 期望 127.0.0.1:3425
+        assert_eq!(
+            held_by_other(Some("http://127.0.0.1:3425/opencode/v1".into()), &target),
+            None,
+            "同网关、不同 agent 前缀只是普通漂移"
+        );
+        assert_eq!(
+            held_by_other(Some("https://127.0.0.1:3425/hermes/v1".into()), &target),
+            None,
+            "scheme 不同但 host:port 相同"
+        );
+        assert_eq!(
+            held_by_other(Some("  http://127.0.0.1:3425/hermes/v1\t".into()), &target),
+            None,
+            "前后空白不影响判断"
+        );
     }
 
     /// 漂移 + 文件地址指向运行中的其他网关 → 判"被他网关占用"，
@@ -1930,6 +2107,143 @@ agents:
         assert!(s.attached);
         assert!(s.drifted);
         assert_eq!(s.other_gateway, None);
+        assert!(s.note.contains("漂移"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 已接入且与当前网关一致：不漂移、不判占用。
+    #[test]
+    fn detect_hermes_consistent_reports_no_occupancy() {
+        enable_isolation_for_tests();
+        let home = tmp_home("ok-hm");
+        let target = hermes_target("hermes");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "model:\n  provider: x\n  base_url: \"http://127.0.0.1:1/v1\"\n").unwrap();
+        apply(&home, &target).unwrap();
+        let s = detect(&home, &target);
+        assert!(s.attached && !s.drifted, "{:?}", s.note);
+        assert_eq!(s.other_gateway, None);
+        assert!(!s.note.contains("其他网关"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// provider 是 agentbuffet、但 base_url 指向别家活着的 LLM 服务：
+    /// 算漂移但不算被占用（巡检照常拉回本网关），且不会误判成别的网关。
+    #[test]
+    fn detect_hermes_pointing_at_plain_llm_is_plain_drift() {
+        enable_isolation_for_tests();
+        let llm = fake_plain_llm();
+        let home = tmp_home("llm-hm");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &cfg,
+            format!("model:\n  provider: agentbuffet\n  base_url: \"http://{llm}/hermes/v1\"\n"),
+        )
+        .unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(s.attached, "{:?}", s.note);
+        assert!(s.drifted);
+        assert_eq!(s.other_gateway, None);
+        assert!(s.note.contains("漂移") && !s.note.contains("其他网关"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 没有接入（provider 不是 agentbuffet）时，即使地址指向活网关也不该判占用：
+    /// 巡检只处理"已接入"的实例，未接入的不在职责内。
+    #[test]
+    fn detect_hermes_unattached_never_reports_occupancy() {
+        enable_isolation_for_tests();
+        let gw = fake_gateway();
+        let home = tmp_home("unattached-hm");
+        let cfg = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &cfg,
+            format!("model:\n  provider: openrouter\n  base_url: \"http://{gw}/hermes/v1\"\n"),
+        )
+        .unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(!s.attached);
+        assert!(!s.drifted);
+        assert_eq!(s.other_gateway, None, "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// OpenCode：按"另一个网关"真实接入过、本网关再检测 → 判被他网关占用。
+    #[test]
+    fn detect_opencode_drift_to_other_gateway_marks_held() {
+        enable_isolation_for_tests();
+        let other_gw = fake_gateway();
+        let home = tmp_home("held-oc");
+        let cfg = home.join(".config").join("opencode").join("opencode.json");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "{}").unwrap();
+
+        let other = target_at("opencode", "opencode", &other_gw.to_string());
+        apply(&home, &other).unwrap();
+
+        let (_hold, ours_addr) = reserved_addr();
+        let ours = target_at("opencode", "opencode", &ours_addr);
+        let s = detect(&home, &ours);
+        assert!(s.attached, "{:?}", s.note);
+        assert!(s.drifted);
+        assert_eq!(
+            s.other_gateway.as_deref(),
+            Some(other.base_url().as_str()),
+            "{:?}",
+            s.note
+        );
+        assert!(s.note.contains("其他网关"), "{:?}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Codex：同上（走 TOML 注入块分支）。
+    #[test]
+    fn detect_codex_drift_to_other_gateway_marks_held() {
+        enable_isolation_for_tests();
+        let other_gw = fake_gateway();
+        let home = tmp_home("held-cx");
+        let cfg = home.join(".codex").join("config.toml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "model = \"x\"\n").unwrap();
+
+        let other = target_at("codex", "codex", &other_gw.to_string());
+        apply(&home, &other).unwrap();
+
+        let (_hold, ours_addr) = reserved_addr();
+        let ours = target_at("codex", "codex", &ours_addr);
+        let s = detect(&home, &ours);
+        assert!(s.attached, "{:?}", s.note);
+        assert!(s.drifted);
+        assert_eq!(
+            s.other_gateway.as_deref(),
+            Some(other.base_url().as_str()),
+            "{:?}",
+            s.note
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Codex：文件指向死地址 → 普通漂移（巡检照修），不判占用。
+    #[test]
+    fn detect_codex_drift_to_dead_addr_is_plain_drift() {
+        enable_isolation_for_tests();
+        let dead = dead_addr();
+        let home = tmp_home("plain-cx");
+        let cfg = home.join(".codex").join("config.toml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "model = \"x\"\n").unwrap();
+
+        let other = target_at("codex", "codex", &dead.to_string());
+        apply(&home, &other).unwrap();
+
+        let (_hold, ours_addr) = reserved_addr();
+        let ours = target_at("codex", "codex", &ours_addr);
+        let s = detect(&home, &ours);
+        assert!(s.drifted);
+        assert_eq!(s.other_gateway, None, "{:?}", s.note);
         assert!(s.note.contains("漂移"), "{:?}", s.note);
         let _ = std::fs::remove_dir_all(&home);
     }
