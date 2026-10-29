@@ -91,6 +91,11 @@ pub struct Agent {
     /// 显式适配器（如 opencode），支持同一工具多实例接入；空则按 id 推断。
     #[serde(default)]
     pub adapter: String,
+    /// 旧版（v0.2.16）接入时写入的实例主目录。新版按 id 里的 `@scope` 定位环境，
+    /// 该字段只用于启动时把旧 dash id（如 `hermes-wsl-ubuntu-24-04-yxf`）迁移成
+    /// 新编码；迁移完成后会被清除。保留解析是为了旧配置不至于直接校验失败。
+    #[serde(default)]
+    pub home: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -521,6 +526,42 @@ pub fn upsert_agent(
     Ok(())
 }
 
+/// 从配置文件里删除一条 agent 记录（detach 用）。没有该记录返回 false，不报错。
+///
+/// 硬约束同 upsert_agent：写回前重新校验整份配置，校验不过就**不落盘**。
+pub fn remove_agent(path: &std::path::Path, id: &str) -> Result<bool, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("读取配置 {} 失败: {e}", path.display()))?;
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(&text)
+        .map_err(|e| format!("解析配置 {} 失败: {e}", path.display()))?;
+    let root = doc
+        .as_mapping_mut()
+        .ok_or_else(|| "配置根节点不是映射".to_string())?;
+    let Some(agents) = root.get_mut(serde_yaml::Value::String("agents".into())) else {
+        return Ok(false);
+    };
+    let Some(seq) = agents.as_sequence_mut() else {
+        return Ok(false);
+    };
+    let before = seq.len();
+    seq.retain(|a| {
+        a.get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s != id)
+            .unwrap_or(true)
+    });
+    if seq.len() == before {
+        return Ok(false);
+    }
+    let out = serde_yaml::to_string(&doc).map_err(|e| format!("序列化配置失败: {e}"))?;
+    let filename = path.display().to_string();
+    if let Err(errs) = load_str(&out, &filename) {
+        return Err(format!("新配置未通过校验，已放弃写入：{}", errs.join("；")));
+    }
+    std::fs::write(path, out).map_err(|e| format!("写入配置 {} 失败: {e}", path.display()))?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,6 +582,33 @@ routing_groups:
 agents:
   - { id: codex, default_group: bbb }
 "#;
+
+    /// 旧版遗留的 `home` 字段必须能解析（否则整份配置直接校验失败），
+    /// 且仅供迁移逻辑读取。
+    #[test]
+    fn agent_accepts_legacy_home_field() {
+        let yaml = YAML.replace(
+            "  - { id: codex, default_group: bbb }",
+            "  - { id: codex, default_group: bbb, home: C:\\Users\\yxf }",
+        );
+        let snap = load_str(&yaml, "t.yaml").expect("home 字段应被接受");
+        assert_eq!(snap.agents["codex"].home, "C:\\Users\\yxf");
+    }
+
+    /// detach 删登记：删掉目标条目、保留其余；无该条目返回 false 不改文件。
+    #[test]
+    fn remove_agent_deletes_entry() {
+        let dir = std::env::temp_dir().join(format!("buffet-rm-agent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("config.yaml");
+        std::fs::write(&p, YAML).unwrap();
+        assert!(remove_agent(&p, "codex").unwrap());
+        let text = std::fs::read_to_string(&p).unwrap();
+        let snap = load_str(&text, "t.yaml").expect("删后仍应通过校验");
+        assert!(snap.agents.is_empty(), "{:?}", snap.agents.keys());
+        assert!(!remove_agent(&p, "codex").unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// 已登记的实例用它自己的默认组；未登记的用第一个组（按名排序）。
     ///

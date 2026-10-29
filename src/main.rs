@@ -70,6 +70,17 @@ agents: []
         }
     };
     let filename = path.display().to_string();
+    // 旧版（v0.2.16）遗留的 dash id / home 字段先迁移成 <kind>@<scope> 编码，
+    // 否则 WSL/Windows 实例会被当成"本机实例"，跨环境读写串台。
+    let renames = agentbuffet::onboard::migrate_legacy_at(&path, &agentbuffet::onboard::home_dir());
+    let text = if renames.is_empty() {
+        text
+    } else {
+        for (o, n) in &renames {
+            eprintln!("AgentBuffet: 迁移旧版 agent 登记 {o} → {n}");
+        }
+        std::fs::read_to_string(&path).unwrap_or(text)
+    };
     match agentbuffet::config::load_str(&text, &filename) {
         Ok(s) => s,
         Err(errs) => {

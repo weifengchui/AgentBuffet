@@ -654,6 +654,155 @@ pub fn status_all(home: &Path, targets: &[Target]) -> Vec<AgentStatus> {
     targets.iter().map(|t| detect(home, t)).collect()
 }
 
+// ---------------------------------------------------------------- 旧版 id 迁移
+
+/// 主目录字符串归一（跨版本比较用）：统一分隔符与大小写、折叠 `\\wsl$\\` 到
+/// `\\wsl.localhost\\`、去掉末尾分隔符。Windows 路径大小写不敏感，统一转小写。
+fn norm_home(s: &str) -> String {
+    let mut t: String = s
+        .trim()
+        .chars()
+        .map(|c| if c == '/' { '\\' } else { c })
+        .collect();
+    while t.len() > 1 && t.ends_with('\\') {
+        t.pop();
+    }
+    t.make_ascii_lowercase();
+    t.replace("\\\\wsl$\\", "\\\\wsl.localhost\\")
+}
+
+/// 旧版 dash 风格 id（`hermes-wsl-ubuntu-24-04-yxf`）→ 基础名。
+/// env 短名取 `wsl` / `win` / `local`；基础名自身可含 `-`（如 claude-code），
+/// 所以按**最后**出现的环境标记切。
+fn legacy_base(id: &str) -> Option<&str> {
+    for m in ["-wsl-", "-win-", "-local-"] {
+        if let Some((base, _)) = id.rsplit_once(m) {
+            if !base.is_empty() {
+                return Some(base);
+            }
+        }
+    }
+    None
+}
+
+/// 把配置里旧版（v0.2.16）遗留的 agent 条目迁移成新的 `<kind>@<scope>` 编码。
+///
+/// 旧版把 WSL / Windows 侧实例登记成 `hermes-wsl-ubuntu-24-04-yxf` 这类 dash id，
+/// 并用 `home` 字段记录真实主目录。新版 scope 解析只认 `@` 后缀——旧 id 会被当成
+/// **本机实例**，于是 WSL 的记录显示、读写全落到 Windows 侧：这正是
+/// "接入 Windows 的 Hermes 却把 WSL 那份也算已接入、删了还提示已接入"的根因。
+///
+/// 迁移规则（按 `home` 字段匹配当前枚举到的环境）：
+/// - 没有 `home` 字段的条目不动（裸名即本机实例，新旧编码一致）；
+/// - `home` 匹配不到任何环境（发行版没启动）→ 原样保留，绝不瞎猜；
+/// - 匹配到 native → 只清掉 `home` 字段；
+/// - 新 id 与既有条目冲突 → 删除旧条目（以新编码那条为准）；
+/// - 其余 → 改写成 `<base>@<scope id>`，base 优先取 `adapter` 字段。
+///
+/// 有变更才回写，且写回前整份重校验，校验不过不落盘。返回 (旧 id, 新 id) 列表，
+/// 新 id 等于旧 id 表示只清了字段。注入文件里的旧 base_url 路径会随后被
+/// 漂移巡检自动改写，无需在此处理。
+pub fn migrate_legacy(path: &std::path::Path, scopes: &[scope::Scope]) -> Vec<(String, String)> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Value>(&text) else {
+        return Vec::new();
+    };
+    let mut renames: Vec<(String, String)> = Vec::new();
+    let mut changed = false;
+    {
+        let Some(root) = doc.as_mapping_mut() else {
+            return renames;
+        };
+        let Some(agents) = root
+            .get_mut(serde_yaml::Value::String("agents".into()))
+            .and_then(|v| v.as_sequence_mut())
+        else {
+            return renames;
+        };
+        let existing: Vec<String> = agents
+            .iter()
+            .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+        let mut drop: Vec<usize> = Vec::new();
+        for (i, entry) in agents.iter_mut().enumerate() {
+            let Some(id) = entry.get("id").and_then(|v| v.as_str()).map(String::from) else {
+                continue;
+            };
+            if id.contains('@') {
+                continue; // 已是新编码
+            }
+            let Some(home_raw) = entry.get("home").and_then(|v| v.as_str()) else {
+                continue; // 无 home：裸名本机实例，新旧编码一致，不动
+            };
+            let want = norm_home(home_raw);
+            let Some(sc) = scopes
+                .iter()
+                .find(|s| norm_home(&s.home.display().to_string()) == want)
+            else {
+                continue; // 环境匹配不上（发行版没启动），保守不动
+            };
+            let base = entry
+                .get("adapter")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.trim().to_string())
+                .or_else(|| legacy_base(&id).map(String::from))
+                .unwrap_or_else(|| id.clone());
+            let new_id = scope::agent_id_for(&base, &sc.id);
+            if new_id == id {
+                // native 实例：只清 home 字段
+                if let Some(m) = entry.as_mapping_mut() {
+                    m.remove(serde_yaml::Value::String("home".into()));
+                    renames.push((id.clone(), new_id));
+                    changed = true;
+                }
+                continue;
+            }
+            if existing.iter().any(|e| *e == new_id) {
+                drop.push(i); // 已有新编码条目，旧的是重复登记
+                renames.push((id, new_id));
+                changed = true;
+                continue;
+            }
+            if let Some(m) = entry.as_mapping_mut() {
+                m.insert(
+                    serde_yaml::Value::String("id".into()),
+                    serde_yaml::Value::String(new_id.clone()),
+                );
+                m.remove(serde_yaml::Value::String("home".into()));
+                renames.push((id, new_id));
+                changed = true;
+            }
+        }
+        for i in drop.iter().rev() {
+            agents.remove(*i);
+        }
+    }
+    if !changed {
+        return renames;
+    }
+    let out = match serde_yaml::to_string(&doc) {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    let filename = path.display().to_string();
+    if crate::config::load_str(&out, &filename).is_err() {
+        return Vec::new(); // 校验不过绝不落盘
+    }
+    if std::fs::write(path, out).is_err() {
+        return Vec::new();
+    }
+    renames
+}
+
+/// 按当前枚举到的环境执行迁移（启动 / 热重载入口用）。
+pub fn migrate_legacy_at(path: &std::path::Path, native_home: &Path) -> Vec<(String, String)> {
+    migrate_legacy(path, &scope::enumerate_cached(native_home))
+}
+
 // ---------------------------------------------------------------- 备份
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -1433,5 +1582,132 @@ mod tests {
         );
         assert_eq!(resolve_home(&home, "hermes", "hermes"), home);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// `\\wsl$\` 与 `\\wsl.localhost\` 是同一入口的两种写法；大小写与末尾
+    /// 分隔符也不应影响匹配。
+    #[test]
+    fn norm_home_unifies_unc_prefix_and_case() {
+        assert_eq!(
+            norm_home("\\\\wsl$\\Ubuntu-24.04\\home\\yxf"),
+            norm_home("\\\\wsl.localhost\\ubuntu-24.04\\home\\yxf\\")
+        );
+        assert_eq!(norm_home("/tmp/a/b"), norm_home("\\tmp\\a\\b"));
+    }
+
+    fn fake_scopes(native: &Path, wsl: &Path, win: &Path) -> Vec<scope::Scope> {
+        vec![
+            scope::native_scope(native),
+            scope::Scope {
+                id: "wsl:Ubuntu-24.04".into(),
+                kind: scope::Kind::Wsl,
+                home: wsl.to_path_buf(),
+                distro: Some("Ubuntu-24.04".into()),
+                user: None,
+                root: None,
+                gw_host: None,
+                note: String::new(),
+            },
+            scope::Scope {
+                id: "win:yxf".into(),
+                kind: scope::Kind::Windows,
+                home: win.to_path_buf(),
+                distro: None,
+                user: Some("yxf".into()),
+                root: None,
+                gw_host: None,
+                note: String::new(),
+            },
+        ]
+    }
+
+    const MIG_HEAD: &str = r#"gateway:
+  addr: "127.0.0.1:3641"
+  ui_addr: "127.0.0.1:3642"
+providers:
+  - { id: p1, vendor: mock, base_url: "http://127.0.0.1:1/v1", api_key_env: K1, models: [m1], allow_private: true }
+routing_groups:
+  - name: bbb
+    strategy: order
+    members: [{ provider: p1, model: m1, priority: 1 }]
+agents:
+"#;
+
+    /// 旧版 dash id（v0.2.16 遗留）按 home 字段迁移成 `<kind>@<scope>` 编码：
+    /// WSL 实例不再被当成"本机实例"（跨环境串台根因）；匹配不到的环境原样保留。
+    #[test]
+    fn migrate_legacy_dash_ids_to_scope_encoding() {
+        let dir = std::env::temp_dir().join(format!("buffet-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let native = dir.join("native");
+        let win = dir.join("Users").join("yxf");
+        std::fs::create_dir_all(&native).unwrap();
+        std::fs::create_dir_all(&win).unwrap();
+        let scopes = fake_scopes(
+            &native,
+            &PathBuf::from("\\\\wsl.localhost\\Ubuntu-24.04\\home\\yxf"),
+            &win,
+        );
+        let cfg = dir.join("config.yaml");
+        std::fs::write(
+            &cfg,
+            &format!(
+                r#"{MIG_HEAD}  - {{ id: hermes-wsl-ubuntu-24-04-yxf, default_group: bbb, adapter: hermes, home: \\wsl$\Ubuntu-24.04\home\yxf }}
+  - {{ id: claude-code-win-yxf, default_group: bbb, home: {} }}
+  - {{ id: codex-wsl-Ghost, default_group: bbb, adapter: codex, home: \\wsl.localhost\Ghost\home\x }}
+  - {{ id: opencode, default_group: bbb, home: {} }}
+"#,
+                win.display(),
+                native.display()
+            ),
+        )
+        .unwrap();
+        let renames = migrate_legacy(&cfg, &scopes);
+        assert_eq!(renames.len(), 3, "3 条被迁移/清理: {renames:?}");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        assert!(text.contains("hermes@wsl:Ubuntu-24.04"), "{text}");
+        assert!(text.contains("claude-code@win:yxf"), "{text}");
+        assert!(text.contains("codex-wsl-Ghost"), "匹配不到环境必须原样保留");
+        assert!(text.contains("id: opencode"), "{text}");
+        // 只有 ghost 那条还留着 home 字段
+        assert_eq!(text.matches("home:").count(), 1, "{text}");
+        // 迁移结果必须能通过整份校验
+        crate::config::load_str(&text, "mig.yaml").expect("迁移后配置应通过校验");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 新旧两条指向同一实例：以新编码为准，旧 dash 条目直接删除（去重）。
+    #[test]
+    fn migrate_legacy_drops_duplicate_of_new_entry() {
+        let dir = std::env::temp_dir().join(format!("buffet-mig2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let native = dir.join("native");
+        std::fs::create_dir_all(&native).unwrap();
+        let scopes = fake_scopes(
+            &native,
+            &PathBuf::from("\\\\wsl.localhost\\Ubuntu-24.04\\home\\yxf"),
+            &dir.join("Users").join("yxf"),
+        );
+        let cfg = dir.join("config.yaml");
+        std::fs::write(
+            &cfg,
+            &format!(
+                r#"{MIG_HEAD}  - {{ id: hermes@wsl:Ubuntu-24.04, default_group: bbb, adapter: hermes }}
+  - {{ id: hermes-wsl-ubuntu-24-04-yxf, default_group: bbb, adapter: hermes, home: \\wsl$\Ubuntu-24.04\home\yxf }}
+"#
+            ),
+        )
+        .unwrap();
+        let renames = migrate_legacy(&cfg, &scopes);
+        assert_eq!(renames.len(), 1);
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            !text.contains("hermes-wsl-ubuntu"),
+            "旧条目应被删除: {text}"
+        );
+        assert_eq!(text.matches("hermes@wsl:Ubuntu-24.04").count(), 1, "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

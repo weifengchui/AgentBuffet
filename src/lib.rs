@@ -417,16 +417,44 @@ async fn agent_detach(
             .map(|a| a.adapter.clone())
             .unwrap_or_default()
     };
-    match onboard::revert(&st.home, &req.agent_id, &hint) {
-        Ok(r) => json_response(
-            StatusCode::OK,
-            serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({})),
-        ),
-        Err(e) => json_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            serde_json::json!({"error": e}),
-        ),
+    let mut payload = match onboard::revert(&st.home, &req.agent_id, &hint) {
+        Ok(r) => serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({})),
+        Err(e) => {
+            // 配置文件本就不存在 / 环境暂时不可达：文件无从还原，但登记必须照删——
+            // 否则 UI 永远显示"已接入"（"删了还提示已接入"的根因之一）。
+            if !(e.contains("不存在") || e.contains("未找到运行环境")) {
+                return json_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    serde_json::json!({"error": e}),
+                );
+            }
+            serde_json::json!({
+                "agent_id": req.agent_id,
+                "files": [],
+                "note": format!("无需还原工具文件（{e}），已删除网关登记"),
+            })
+        }
+    };
+    // 还原工具文件之外，还要删掉 config.yaml 里的 agent 登记并热重载；
+    // 只 revert 不删登记的话，这条实例会一直留在列表里显示"已接入"，
+    // 且 30s 漂移巡检还会继续按它写配置。
+    if let Some(path) = st.config_path.clone() {
+        match config::remove_agent(&path, &req.agent_id) {
+            Ok(true) => {
+                let _ = do_reload(&st).await;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "warning".into(),
+                        serde_json::json!(format!("已还原工具配置，但删除 agent 登记失败: {e}")),
+                    );
+                }
+            }
+        }
     }
+    json_response(StatusCode::OK, payload)
 }
 
 // ---------------------------------------------------------------- 开机自启
@@ -542,6 +570,23 @@ async fn do_reload(st: &proxy::AppState) -> (StatusCode, serde_json::Value) {
         );
     };
     let filename = path.display().to_string();
+    // 旧版（v0.2.16）遗留的 dash id 先迁移成 <kind>@<scope> 编码，再读取校验，
+    // 否则 WSL/Windows 侧实例会被当成"本机实例"，跨环境读写串台。
+    let renames = onboard::migrate_legacy_at(path, &st.home);
+    if !renames.is_empty() {
+        eprintln!(
+            "AgentBuffet: 已迁移旧版 agent 登记：{}",
+            renames
+                .iter()
+                .map(|(o, n)| if o == n {
+                    format!("{o}（清除 home）")
+                } else {
+                    format!("{o} → {n}")
+                })
+                .collect::<Vec<_>>()
+                .join("，")
+        );
+    }
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
