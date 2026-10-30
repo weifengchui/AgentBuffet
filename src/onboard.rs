@@ -269,11 +269,33 @@ impl Adapter {
                 Some(home.join(".config").join("opencode").join(fname))
             }
             Adapter::Codex => Some(home.join(".codex").join("config.toml")),
-            Adapter::Hermes => Some(home.join(".hermes").join("config.yaml")),
+            Adapter::Hermes => Some(hermes_config_path(home)),
             Adapter::ClaudeCode => Some(home.join(".claude.json")),
             Adapter::Generic => None,
         }
     }
+}
+
+/// Hermes 的多配置档：`~/.hermes/active_profile` 记录当前活跃档，非 default 时
+/// 该档的配置在 `~/.hermes/profiles/<名称>/config.yaml`。用户裸跑 `hermes` 用的就是
+/// 活跃档，若只把默认档配置好，选择模型列表里仍然看不到 AgentBuffet。
+fn hermes_config_path(home: &Path) -> PathBuf {
+    let root = home.join(".hermes");
+    if let Ok(raw) = std::fs::read_to_string(root.join("active_profile")) {
+        let name = raw.trim();
+        let safe = !name.is_empty()
+            && name != "default"
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if safe {
+            let p = root.join("profiles").join(name).join("config.yaml");
+            if p.is_file() {
+                return p;
+            }
+        }
+    }
+    root.join("config.yaml")
 }
 
 /// 解析该 Agent 实际所在的主目录。
@@ -1551,7 +1573,126 @@ fn hm_render(text: &str, target: &Target) -> Result<String, String> {
     if text.ends_with('\n') {
         res.push('\n');
     }
-    Ok(res)
+    // Hermes 的「选择模型」列表只认识内置 provider 与 custom_providers 里的条目；
+    // 只写 model.* 会让 AgentBuffet 在 picker 中不可见，所以同时登记一个命名条目。
+    Ok(hm_upsert_custom(&res, target))
+}
+
+/// 把 AgentBuffet 登记到顶层 `custom_providers:`（已存在则原地替换），其余行保持不变。
+/// idempotent：重复调用不会追加多条。
+fn hm_upsert_custom(text: &str, target: &Target) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| !l.starts_with(' ') && !l.starts_with('\t') && l.trim_start().starts_with("custom_providers:"));
+    let Some(start) = start else {
+        // 没有该段：追加到文件末尾
+        let mut out = text.trim_end().to_string();
+        out.push_str("\ncustom_providers:\n");
+        out.push_str(&hm_custom_item("  ", target));
+        out.push('\n');
+        return out;
+    };
+    // 块范围：到下一个顶层行为止
+    let mut end = start + 1;
+    while end < lines.len() {
+        let l = lines[end];
+        if l.trim().is_empty() || l.trim_start().starts_with('#') {
+            end += 1;
+            continue;
+        }
+        if l.starts_with(' ') || l.starts_with('\t') {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    let inline = lines[start].trim_end().ends_with("[]");
+    if inline {
+        let mut out = Vec::with_capacity(lines.len() + 4);
+        for (i, l) in lines.iter().enumerate() {
+            if i == start {
+                out.push("custom_providers:".to_string());
+                out.extend(hm_custom_item("  ", target).lines().map(str::to_string));
+            } else {
+                out.push(l.to_string());
+            }
+        }
+        let mut res = out.join("\n");
+        if text.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+    // 条目缩进沿用块内第一条；找同名条目并替换其整段
+    let indent = lines[start + 1..end]
+        .iter()
+        .find(|l| l.starts_with(' ') && l.trim_start().starts_with("- "))
+        .map(|l| l[..l.len() - l.trim_start().len()].to_string())
+        .unwrap_or_else(|| "  ".to_string());
+    let same_indent = |l: &str| l.starts_with(&indent) && l[indent.len()..].starts_with("- ");
+    let found = lines[start + 1..end].iter().position(|l| {
+        l.trim_start()
+            .strip_prefix("- name:")
+            .map(|v| v.trim().trim_matches('"').trim_matches('\'') == PROVIDER_NAME)
+            .unwrap_or(false)
+    });
+    let mut out = Vec::with_capacity(lines.len() + 4);
+    if let Some(off) = found {
+        let s0 = start + 1 + off;
+        let mut e0 = s0 + 1;
+        while e0 < end && !same_indent(lines[e0]) {
+            e0 += 1;
+        }
+        for (i, l) in lines.iter().enumerate() {
+            if i == s0 {
+                out.extend(hm_custom_item(&indent, target).lines().map(str::to_string));
+            } else if i > s0 && i < e0 {
+                continue;
+            } else {
+                out.push(l.to_string());
+            }
+        }
+    } else {
+        // 接在最后一个既有条目之后（而不是紧贴 `custom_providers:` 行），
+        // 否则条目上方的注释会被割裂到我们的条目下面。
+        let at = lines[start + 1..end]
+            .iter()
+            .rposition(|l| same_indent(l))
+            .map(|off| {
+                // 跳过该条目的续行（更深缩进），整条结束处才是插入点
+                let mut i = start + 1 + off;
+                while i + 1 < end && lines[i + 1].starts_with(&indent) && !same_indent(lines[i + 1]) {
+                    i += 1;
+                }
+                i
+            })
+            .unwrap_or(start);
+        for (i, l) in lines.iter().enumerate() {
+            out.push(l.to_string());
+            if i == at {
+                out.extend(hm_custom_item(&indent, target).lines().map(str::to_string));
+            }
+        }
+    }
+    let mut res = out.join("\n");
+    if text.ends_with('\n') {
+        res.push('\n');
+    }
+    res
+}
+
+/// 单个命名条目（name 固定为 agentbuffet，模型指向默认路由组）。
+fn hm_custom_item(indent: &str, target: &Target) -> String {
+    let pad = format!("{indent}  ");
+    format!(
+        "{indent}- name: {PROVIDER_NAME}\n\
+         {pad}base_url: \"{}\"\n\
+         {pad}api_key: {KEY_PLACEHOLDER}\n\
+         {pad}model: \"group/{}\"",
+        target.base_url(),
+        target.default_group
+    )
 }
 
 fn hm_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> ApplyResult {
@@ -1667,6 +1808,52 @@ mod tests {
             p.ends_with(".hermes/config.yaml") || p.ends_with(".hermes\\config.yaml"),
             "{p}"
         );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 活跃档非 default 时，Hermes 的配置指向 profiles/<名称>/config.yaml。
+    #[test]
+    fn hermes_config_path_follows_active_profile() {
+        let home = tmp_home("hm-profile");
+        let root = home.join(".hermes");
+        let p = root.join("profiles").join("study").join("config.yaml");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&p, "model:\n  provider: x\n").unwrap();
+        assert_eq!(hermes_config_path(&home), p);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 活跃档文件不存在、或名字不合法（防目录穿越）时回落到默认档。
+    #[test]
+    fn hermes_config_path_falls_back_to_default() {
+        let home = tmp_home("hm-profile-fallback");
+        let root = home.join(".hermes");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("active_profile"), "../evil\n").unwrap();
+        assert_eq!(hermes_config_path(&home), root.join("config.yaml"));
+        std::fs::write(root.join("active_profile"), "ghost\n").unwrap();
+        assert_eq!(hermes_config_path(&home), root.join("config.yaml"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 接入写的是活跃档的配置文件，默认档保持不动。
+    #[test]
+    fn apply_hermes_writes_active_profile_config() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-apply-profile");
+        let root = home.join(".hermes");
+        let p = root.join("profiles").join("study").join("config.yaml");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&p, "model:\n  provider: x\n").unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        apply(&home, &hermes_target("hermes")).unwrap();
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.contains(&format!("provider: {PROVIDER_NAME}")), "{text}");
+        assert!(text.contains("- name: agentbuffet"), "{text}");
+        let default_text = std::fs::read_to_string(root.join("config.yaml")).unwrap();
+        assert!(default_text.contains("provider: y"), "{default_text}");
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -2148,6 +2335,56 @@ agents:
         assert_eq!(s.other_gateway, None);
         assert!(s.note.contains("漂移") && !s.note.contains("其他网关"), "{:?}", s.note);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Hermes 的「选择模型」只枚举 custom_providers 条目：注入必须登记命名条目，
+    /// 否则 picker 里看不到 AgentBuffet。
+    #[test]
+    fn hermes_render_registers_custom_provider_entry() {
+        let target = hermes_target("hermes");
+        let out = hm_render("model:\n  provider: x\n", &target).unwrap();
+        assert!(out.contains("custom_providers:"), "{out}");
+        assert!(out.contains("- name: agentbuffet"), "{out}");
+        assert!(
+            out.contains(&format!("base_url: \"{}\"", target.base_url())),
+            "{out}"
+        );
+        assert!(out.contains("model: \"group/g\""), "{out}");
+    }
+
+    /// 用户既有条目与注释原样保留，只追加我们的条目；重复注入内容不变。
+    #[test]
+    fn hermes_render_keeps_user_entries_and_is_idempotent() {
+        let target = hermes_target("hermes");
+        let text = "model:\n  provider: x\ncustom_providers:\n  # 用户自己的\n  - name: fox\n    base_url: https://code.newcli.com/codex/v1\n    model: gpt-5.4\nproviders: {}\n";
+        let out = hm_render(text, &target).unwrap();
+        assert!(out.contains("- name: fox"), "{out}");
+        assert!(out.contains("# 用户自己的"), "{out}");
+        assert!(out.contains("providers: {}"), "{out}");
+        assert_eq!(out.matches("- name: agentbuffet").count(), 1, "{out}");
+        assert_eq!(hm_render(&out, &target).unwrap(), out, "重复注入应无变更");
+    }
+
+    /// 已存在同名条目（旧地址/旧模型）时整段就地替换，不重复追加。
+    #[test]
+    fn hermes_render_updates_existing_agentbuffet_entry() {
+        let target = hermes_target("hermes");
+        let text = "model:\n  provider: agentbuffet\n  base_url: \"http://127.0.0.1:3425/hermes/v1\"\ncustom_providers:\n  - name: agentbuffet\n    base_url: \"http://old:1/x/v1\"\n    api_key: agentbuffet\n    model: \"group/old\"\n  - name: fox\n    base_url: https://code.newcli.com/codex/v1\n";
+        let out = hm_render(text, &target).unwrap();
+        assert!(!out.contains("http://old:1/x/v1"), "{out}");
+        assert_eq!(out.matches("- name: agentbuffet").count(), 1, "{out}");
+        assert!(out.contains("model: \"group/g\""), "{out}");
+        assert!(out.contains("- name: fox"), "{out}");
+    }
+
+    /// `custom_providers: []` 内联空数组要展开成块，否则条目插不进去。
+    #[test]
+    fn hermes_render_expands_inline_empty_custom_providers() {
+        let target = hermes_target("hermes");
+        let out = hm_render("model:\n  provider: x\ncustom_providers: []\n", &target).unwrap();
+        assert!(!out.contains("custom_providers: []"), "{out}");
+        assert!(out.contains("- name: agentbuffet"), "{out}");
+        assert!(out.ends_with('\n'), "末尾换行应保留: {out:?}");
     }
 
     /// 没有接入（provider 不是 agentbuffet）时，即使地址指向活网关也不该判占用：
