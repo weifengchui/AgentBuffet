@@ -503,10 +503,27 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
                     s.other_gateway = held_by_other(file_url, target);
                 }
             }
+            let profiles = hermes_profile_configs(home);
+            let missing: Vec<String> = profiles
+                .iter()
+                .filter(|f| {
+                    std::fs::read_to_string(f)
+                        .map(|t| !hm_has_custom(&t))
+                        .unwrap_or(true)
+                })
+                .map(|f| hm_profile_label(f))
+                .collect();
             s.note = match &s.other_gateway {
                 Some(u) => other_gw_note(u),
                 None if s.drifted => {
                     "已接入但 base_url 与当前网关不一致（漂移），重新 attach 可修复".into()
+                }
+                None if !missing.is_empty() => format!(
+                    "以下配置档未登记 {PROVIDER_NAME}：{}；重新 attach 可补齐",
+                    missing.join("、")
+                ),
+                None if s.attached => {
+                    format!("已接入全部 {} 个配置档：{}", profiles.len(), locs.join("；"))
                 }
                 None => locs.join("；"),
             };
@@ -588,9 +605,17 @@ pub fn plan(home: &Path, target: &Target) -> Result<ApplyResult, String> {
             Ok(cx_result(target, &path, &text, &new_text, DRY_NOTE, note))
         }
         Adapter::Hermes => {
-            let (path, text) = hm_read(home, target)?;
-            let new_text = hm_render(&text, target)?;
-            Ok(hm_result(target, &path, &text, &new_text, DRY_NOTE))
+            let changes = hm_render_all(home, target)?;
+            let untouched = changes.iter().all(|(_, old, new)| old == new);
+            Ok(hm_result_files(
+                target,
+                &changes,
+                if untouched {
+                    "已接入且配置一致，无需变更"
+                } else {
+                    DRY_NOTE
+                },
+            ))
         }
     }
 }
@@ -649,21 +674,24 @@ pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
             ))
         }
         Adapter::Hermes => {
-            let (path, text) = hm_read(home, target)?;
-            let new_text = hm_render(&text, target)?;
-            if new_text == text {
-                return Ok(hm_result(
+            let changes = hm_render_all(home, target)?;
+            let dirty: Vec<&(PathBuf, String, String)> = changes
+                .iter()
+                .filter(|(_, old, new)| old != new)
+                .collect();
+            if dirty.is_empty() {
+                return Ok(hm_result_files(
                     target,
-                    &path,
-                    &text,
-                    &new_text,
+                    &changes,
                     "已接入且配置一致，无需变更",
                 ));
             }
-            backup(&path)?;
-            std::fs::write(&path, &new_text)
-                .map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
-            Ok(hm_result(target, &path, &text, &new_text, APPLIED_NOTE))
+            for (path, _, new_text) in &dirty {
+                backup(path)?;
+                std::fs::write(path, new_text)
+                    .map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+            }
+            Ok(hm_result_files(target, &changes, APPLIED_NOTE))
         }
     }
 }
@@ -1473,19 +1501,81 @@ fn line_preview(old: &str, new: &str) -> String {
 
 // ---------------------------------------------------------------- Hermes（YAML）
 
-fn hm_read(home: &Path, target: &Target) -> Result<(PathBuf, String), String> {
-    let path = Adapter::Hermes
+/// 需要登记 `custom_providers` 的全部配置档：默认档 + `profiles/*/config.yaml`。
+///
+/// Hermes 的「选择模型」列表按配置档生效，只改活跃档会让其它档里看不到
+/// AgentBuffet；这里按目录实际存在的配置文件枚举，不凭空新建档。
+fn hermes_profile_configs(home: &Path) -> Vec<PathBuf> {
+    let root = home.join(".hermes");
+    let mut out = Vec::new();
+    let def = root.join("config.yaml");
+    if def.is_file() {
+        out.push(def);
+    }
+    let dir = root.join("profiles");
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        let mut subs: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        subs.sort();
+        for d in subs {
+            let c = d.join("config.yaml");
+            if c.is_file() {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// 配置档展示名：默认档记作 `default`，其余用目录名。
+fn hm_profile_label(path: &Path) -> String {
+    match path.parent().and_then(|d| d.file_name()) {
+        Some(n) if n == ".hermes" => "default".to_string(),
+        Some(n) => n.to_string_lossy().to_string(),
+        None => path.display().to_string(),
+    }
+}
+
+fn hm_has_custom(text: &str) -> bool {
+    text.lines().any(|l| {
+        l.trim()
+            .strip_prefix("- name:")
+            .map(|v| v.trim().trim_matches('"').trim_matches('\'') == PROVIDER_NAME)
+            .unwrap_or(false)
+    })
+}
+
+/// 读取并渲染全部配置档：活跃档做完整注入（model 块 + custom_providers），
+/// 其余档只补 custom_providers 条目（model 块保持用户当前选择）。
+fn hm_render_all(home: &Path, target: &Target) -> Result<Vec<(PathBuf, String, String)>, String> {
+    let active = Adapter::Hermes
         .config_path(home, &target.agent_id)
         .expect("hermes whitelist path");
-    if !path.exists() {
+    if !active.exists() {
         return Err(format!(
             "未检测到 Hermes 配置文件 {}，请先在本机安装 Hermes",
-            path.display()
+            active.display()
         ));
     }
-    let text =
-        std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
-    Ok((path, text))
+    let mut files = hermes_profile_configs(home);
+    if !files.iter().any(|p| p == &active) {
+        files.insert(0, active.clone());
+    }
+    let mut out = Vec::with_capacity(files.len());
+    for p in files {
+        let text =
+            std::fs::read_to_string(&p).map_err(|e| format!("读取 {} 失败: {e}", p.display()))?;
+        let new_text = if p == active {
+            hm_render(&text, target)?
+        } else {
+            hm_upsert_custom(&text, target)
+        };
+        out.push((p, text, new_text));
+    }
+    Ok(out)
 }
 
 /// 顶层 `model:` 块范围 (start, end)，不含 `model:` 行本身。
@@ -1695,14 +1785,22 @@ fn hm_custom_item(indent: &str, target: &Target) -> String {
     )
 }
 
-fn hm_result(target: &Target, path: &Path, old: &str, new: &str, note: &str) -> ApplyResult {
+fn hm_result_files(
+    target: &Target,
+    changes: &[(PathBuf, String, String)],
+    note: &str,
+) -> ApplyResult {
     ApplyResult {
         agent_id: target.agent_id.clone(),
         adapter: Adapter::Hermes.name(),
-        files: vec![FileChange {
-            path: path.display().to_string(),
-            preview: line_preview(old, new),
-        }],
+        files: changes
+            .iter()
+            .filter(|(_, old, new)| old != new)
+            .map(|(p, old, new)| FileChange {
+                path: p.display().to_string(),
+                preview: line_preview(old, new),
+            })
+            .collect(),
         env_template: None,
         note: note.into(),
     }
@@ -1837,7 +1935,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// 接入写的是活跃档的配置文件，默认档保持不动。
+    /// 接入写的是活跃档的配置文件（model 块 + 条目），其余配置档只补条目。
     #[test]
     fn apply_hermes_writes_active_profile_config() {
         enable_isolation_for_tests();
@@ -1854,6 +1952,128 @@ mod tests {
         assert!(text.contains("- name: agentbuffet"), "{text}");
         let default_text = std::fs::read_to_string(root.join("config.yaml")).unwrap();
         assert!(default_text.contains("provider: y"), "{default_text}");
+        assert!(default_text.contains("- name: agentbuffet"), "{default_text}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 所有 profile 的配置档都要补条目；没有 config.yaml 的目录不新建文件。
+    #[test]
+    fn apply_hermes_covers_all_profiles() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-apply-all");
+        let root = home.join(".hermes");
+        let active = root.join("profiles").join("study").join("config.yaml");
+        let other = root.join("profiles").join("agentlink").join("config.yaml");
+        let empty = root.join("profiles").join("b1w1").join("config.yaml");
+        std::fs::create_dir_all(active.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(empty.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&active, "model:\n  provider: x\n").unwrap();
+        std::fs::write(&other, "model:\n  provider: z\n").unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        let r = apply(&home, &hermes_target("hermes")).unwrap();
+        assert_eq!(r.files.len(), 3, "{:?}", r.files.iter().map(|f| &f.path));
+        for cfg in [
+            active.as_path(),
+            other.as_path(),
+            root.join("config.yaml").as_path(),
+        ] {
+            let t = std::fs::read_to_string(cfg).unwrap();
+            assert_eq!(t.matches("- name: agentbuffet").count(), 1, "{t}");
+        }
+        assert!(std::fs::read_to_string(&active)
+            .unwrap()
+            .contains(&format!("provider: {PROVIDER_NAME}")));
+        assert!(std::fs::read_to_string(&other).unwrap().contains("provider: z"));
+        assert!(!empty.exists(), "没有配置文件的档不应被新建: {}", empty.display());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 重复 attach：所有档都已登记时不写盘、不产生 diff。
+    #[test]
+    fn apply_hermes_is_idempotent_across_profiles() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-apply-idem");
+        let root = home.join(".hermes");
+        let p = root.join("profiles").join("study").join("config.yaml");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&p, "model:\n  provider: x\n").unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        apply(&home, &hermes_target("hermes")).unwrap();
+        let again = apply(&home, &hermes_target("hermes")).unwrap();
+        assert!(again.files.is_empty(), "{:?}", again.files);
+        assert!(again.note.contains("无需变更"), "{}", again.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 预览：多文件 diff 一次展示，且 plan 不落盘。
+    #[test]
+    fn plan_hermes_previews_every_changed_file() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-plan-all");
+        let root = home.join(".hermes");
+        let active = root.join("profiles").join("study").join("config.yaml");
+        let other = root.join("profiles").join("agentlink").join("config.yaml");
+        std::fs::create_dir_all(active.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&active, "model:\n  provider: x\n").unwrap();
+        std::fs::write(&other, "model:\n  provider: z\n").unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        let before = std::fs::read_to_string(&other).unwrap();
+        let r = plan(&home, &hermes_target("hermes")).unwrap();
+        assert_eq!(r.files.len(), 3, "{:?}", r.files.iter().map(|f| &f.path));
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), before, "plan 不应落盘");
+        assert!(r.note.contains("dry-run"), "{}", r.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// detect 反映条目覆盖情况：缺档时点名提示，齐全后报告全部档已接入。
+    #[test]
+    fn detect_hermes_reports_profile_coverage() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-detect-coverage");
+        let root = home.join(".hermes");
+        let active = root.join("profiles").join("study").join("config.yaml");
+        let other = root.join("profiles").join("agentlink").join("config.yaml");
+        std::fs::create_dir_all(active.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&active, "model:\n  provider: x\n").unwrap();
+        std::fs::write(&other, "model:\n  provider: z\n").unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(!s.attached);
+        assert!(s.note.contains("未登记"), "{}", s.note);
+        assert!(s.note.contains("agentlink"), "{}", s.note);
+        apply(&home, &hermes_target("hermes")).unwrap();
+        let s = detect(&home, &hermes_target("hermes"));
+        assert!(s.attached);
+        assert!(!s.drifted);
+        assert!(s.note.contains("全部 3 个配置档"), "{}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 枚举只认真实存在的配置文件：只有目录（或只有非默认档）时不虚报。
+    #[test]
+    fn hermes_profile_configs_only_existing_files() {
+        let home = tmp_home("hm-profile-enum");
+        let root = home.join(".hermes");
+        let with = root.join("profiles").join("study").join("config.yaml");
+        let without = root.join("profiles").join("b1w1");
+        std::fs::create_dir_all(with.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&without).unwrap();
+        std::fs::write(&with, "model: {}\n").unwrap();
+        let got = hermes_profile_configs(&home);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0], with);
+        std::fs::write(root.join("config.yaml"), "model: {}\n").unwrap();
+        let got = hermes_profile_configs(&home);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(hm_profile_label(&got[0]), "default");
+        assert_eq!(hm_profile_label(&got[1]), "study");
         let _ = std::fs::remove_dir_all(&home);
     }
 
