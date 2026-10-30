@@ -634,27 +634,34 @@ $("lang-btn").onclick = toggleLang;
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopMap(); else if (curView === "overview") startMap(); });
 
 // ---------------- overview ----------------
+let ovSig = "";
+function renderOverview(j) {
+  // 星图每 3s 轮询同一接口：数据没变就不重写 DOM（避免表格滚动位置被重置）。
+  const sig = JSON.stringify([j.date, j.totals, j.recent]);
+  if (sig === ovSig) return;
+  ovSig = sig;
+  state.totals = j.totals; state.date = j.date; renderPills();
+  $("ov-req").textContent = fmt(j.totals.requests);
+  $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
+  $("ov-ct").textContent = fmt(j.totals.completion_tokens);
+  $("ov-cost").textContent = "$" + (j.totals.cost_est ?? 0).toFixed(4);
+  $("ov-recent").innerHTML = (j.recent || []).map(e => `<tr>
+    <td class="muted">${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
+    <td>${esc(e.provider)}</td><td>${esc(e.model)}${isFreeM(e.provider, e.model) ? freeTag() : ""}</td>
+    <td><span class="pill ${e.status < 400 ? "on" : "off"}"><i></i>${e.status}</span></td>
+    <td class="muted">${fmt(e.prompt_tokens)} / ${fmt(e.completion_tokens)}</td>
+    <td>${e.cost_est == null ? "-" : "$" + e.cost_est.toFixed(4)}</td>
+    <td class="muted">${e.duration_ms} ms</td>
+    <td>${(e.fail_chain || []).map(h => { const i = h.lastIndexOf(":"); const p = i > 0 ? h.slice(0, i) : h, st = i > 0 ? h.slice(i + 1) : "";
+      const c = { ok: "#3fb950", degraded: "#f85149", circuit_open: "#d29922", quota_exhausted: "#d29922" }[st] || "#50607a";
+      return `<span class="fc" title="${esc(st ? stLabel(st) : "-")}"><i style="background:${c}"></i>${esc(p)}</span>`; }).join('<span class="muted">→</span>') || `<span class="muted">-</span>`}</td>
+  </tr>`).join("")
+    || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
+}
 async function loadOverview() {
   try {
     const j = await api("/api/overview");
-    state.totals = j.totals; state.date = j.date; renderPills();
-    $("ov-req").textContent = fmt(j.totals.requests);
-    $("ov-pt").textContent = fmt(j.totals.prompt_tokens);
-    $("ov-ct").textContent = fmt(j.totals.completion_tokens);
-    $("ov-cost").textContent = "$" + (j.totals.cost_est ?? 0).toFixed(4);
-    $("ov-recent").innerHTML = (j.recent || []).map(e => `<tr>
-      <td class="muted">${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
-      <td>${esc(e.provider)}</td><td>${esc(e.model)}${isFreeM(e.provider, e.model) ? freeTag() : ""}</td>
-      <td><span class="pill ${e.status < 400 ? "on" : "off"}"><i></i>${e.status}</span></td>
-      <td class="muted">${fmt(e.prompt_tokens)} / ${fmt(e.completion_tokens)}</td>
-      <td>${e.cost_est == null ? "-" : "$" + e.cost_est.toFixed(4)}</td>
-      <td class="muted">${e.duration_ms} ms</td>
-      <td>${(e.fail_chain || []).map(h => { const i = h.lastIndexOf(":"); const p = i > 0 ? h.slice(0, i) : h, st = i > 0 ? h.slice(i + 1) : "";
-        const c = { ok: "#3fb950", degraded: "#f85149", circuit_open: "#d29922", quota_exhausted: "#d29922" }[st] || "#50607a";
-        return `<span class="fc" title="${esc(st ? stLabel(st) : "-")}"><i style="background:${c}"></i>${esc(p)}</span>`; }).join('<span class="muted">→</span>') || `<span class="muted">-</span>`}</td>
-    </tr>`).join("")
-      || `<tr><td colspan="10"><div class="empty"><div class="big">☕</div><b>${esc(L("今天还没有请求", "No requests yet today"))}</b>${esc(L("接入你的编程 Agent 后，流量统计会实时出现在这里", "Traffic will appear here once your coding agents go through the gateway"))}</div></td></tr>`;
-    return true;
+    renderOverview(j);
     loadMap();
     return true;
   } catch (err) { toast(err.message, "bad"); return false; }
@@ -677,6 +684,7 @@ async function loadMap() {
     const [agents, routing, providers, ov] = await Promise.all([
       api("/api/agents"), api("/api/routing"), api("/api/providers"), api("/api/overview"),
     ]);
+    renderOverview(ov);
     drawMap(agents.filter(a => a.attached), routing.groups || [], providers, ov.recent || []);
   } catch (e) { /* 星图不可用时静默 */ }
 }
