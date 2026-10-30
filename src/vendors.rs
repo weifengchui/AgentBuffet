@@ -148,6 +148,17 @@ pub fn catalog() -> Vec<Vendor> {
     ]
 }
 
+/// 「自定义」伪厂商：不在目录里，由 UI 追加，端点与模型名全部由用户填写。
+pub const CUSTOM: &str = "custom";
+
+/// 自定义服务商 id 只接受字母、数字、`-`、`_`（要能拼出合法的环境变量名）。
+pub fn valid_custom_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// provider id：单套餐厂商用厂商名，多套餐用 `厂商-套餐`。
 pub fn provider_id(vendor_id: &str, plan_id: &str) -> String {
     let plans = catalog()

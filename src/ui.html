@@ -821,26 +821,48 @@ async function catalog() {
 async function openAddWizard() {
   let vs;
   try { vs = await catalog(); } catch (err) { return toast(err.message, "bad"); }
+  // 目录之外再追加一个「自定义」入口：端点、id、模型都由用户填。
+  vs = vs.concat([{
+    id: "custom",
+    name_zh: "自定义（OpenAI 兼容）",
+    name_en: "Custom (OpenAI-compatible)",
+    plans: [{ id: "custom", label_zh: "自定义端点", label_en: "Custom endpoint", base_url: "", models: [] }],
+  }]);
   const vn = (v) => lang === "zh" ? v.name_zh : v.name_en;
   const pl = (p) => lang === "zh" ? p.label_zh : p.label_en;
   openModal(L("添加服务商", "Add provider"), `
     <label class="f"><span>${esc(L("厂商", "Vendor"))}</span>
       <select id="wz-vendor">${vs.map((v, i) => `<option value="${i}">${esc(vn(v))}</option>`).join("")}</select></label>
-    <label class="f"><span>${esc(L("套餐 / 接入方式", "Plan"))}</span><select id="wz-plan"></select></label>
-    <div class="muted" id="wz-info" style="margin:-4px 0 12px"></div>
+    <div id="wz-plan-wrap">
+      <label class="f"><span>${esc(L("套餐 / 接入方式", "Plan"))}</span><select id="wz-plan"></select></label>
+      <div class="muted" id="wz-info" style="margin:-4px 0 12px"></div>
+    </div>
+    <div id="wz-custom" style="display:none">
+      <label class="f"><span>${esc(L("服务商 ID", "Provider ID"))} <span class="muted">${esc(L("（字母、数字、- 或 _）", "(letters, digits, - or _)"))}</span></span>
+        <input id="wz-id" type="text" autocomplete="off" placeholder="my-endpoint"></label>
+      <label class="f"><span>Base URL</span>
+        <input id="wz-url" type="text" autocomplete="off" placeholder="http://127.0.0.1:1234/v1"></label>
+      <label class="f"><span>${esc(L("模型列表（每行一个，留空则自动拉取）", "Models (one per line; empty = auto fetch)"))}</span>
+        <textarea id="wz-models" rows="3" spellcheck="false" style="font:12px/1.55 ui-monospace,Consolas,monospace"></textarea></label>
+    </div>
     <label class="f"><span>API Key <span class="muted">${esc(L("（逗号分隔可粘贴多个）", "(comma-separated for multiple)"))}</span></span>
       <input id="wz-key" type="password" autocomplete="off" placeholder="${esc(L("粘贴 API Key", "Paste API key"))}"></label>
     <div class="muted">${esc(L("Key 只写入本机 env 文件（0600），不会进入 config.yaml。", "The key is stored only in the local env file (0600), never in config.yaml."))}</div>`,
     `<button class="btn ghost" onclick="closeModal()">${esc(t("common.cancel"))}</button>
      <button class="btn primary" id="wz-ok">${esc(L("添加", "Add"))}</button>`);
+  const isCustom = () => vs[+$("wz-vendor").value].id === "custom";
   const fill = () => {
     const v = vs[+$("wz-vendor").value];
     const psel = $("wz-plan");
     psel.innerHTML = v.plans.map((p, i) => `<option value="${i}">${esc(pl(p))}</option>`).join("");
     if (v.plans.length === 1) psel.value = "0";
+    const custom = isCustom();
+    $("wz-plan-wrap").style.display = custom ? "none" : "";
+    $("wz-custom").style.display = custom ? "" : "none";
     show();
   };
   const show = () => {
+    if (isCustom()) return;
     const v = vs[+$("wz-vendor").value];
     const p = v.plans[+$("wz-plan").value];
     $("wz-info").textContent = p.base_url + " · " + (p.models || []).length + " " + L("预置模型", "preset models");
@@ -853,12 +875,20 @@ async function openAddWizard() {
     const p = v.plans[+$("wz-plan").value];
     const key = $("wz-key").value.trim();
     if (!key) return toast(L("请输入 API Key", "Please paste the API key"), "warn");
+    const custom = v.id === "custom";
+    const cid = $("wz-id").value.trim();
+    const curl = $("wz-url").value.trim();
+    if (custom && !cid) return toast(L("请填写服务商 ID", "Please fill in the provider ID"), "warn");
+    if (custom && !curl) return toast(L("请填写 Base URL", "Please fill in the base URL"), "warn");
+    const cmodels = custom ? $("wz-models").value.split(/[\n,]/).map(s => s.trim()).filter(Boolean) : [];
     $("wz-ok").disabled = true;
     try {
-      const r = await post("/_admin/provider", { vendor: v.id, plan: p.id, api_key: key });
+      const r = await post("/_admin/provider", custom
+        ? { vendor: "custom", plan: "custom", api_key: key, id: cid, base_url: curl, models: cmodels }
+        : { vendor: v.id, plan: p.id, api_key: key });
       closeModal();
       (r.warnings || []).forEach(w => toast(w, "warn"));
-      toast(L("已添加 ", "Added ") + v.id + "/" + p.id + L("，模型列表已自动同步", ", model list synced"), "ok");
+      toast(L("已添加 ", "Added ") + (custom ? cid : v.id + "/" + p.id) + L("，模型列表已自动同步", ", model list synced"), "ok");
       loadProviders();
     } catch (err) { toast(err.message, "bad"); $("wz-ok").disabled = false; }
   };

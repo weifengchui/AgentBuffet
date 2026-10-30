@@ -194,6 +194,65 @@ async fn invalid_inputs_422_keep_file() {
 }
 
 #[tokio::test]
+async fn add_custom_provider_writes_user_endpoint() {
+    let (st, dir) = state_for("custom");
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "POST",
+        "/_admin/provider",
+        Some(serde_json::json!({
+            "vendor": "custom", "plan": "custom", "api_key": "k-custom",
+            "id": "my-local", "base_url": "http://127.0.0.1:9/v1",
+            "models": ["m1", "  "]
+        })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{j}");
+    assert_eq!(j["provider"], "my-local");
+    assert_eq!(j["api_key_env"], "BUFFET_MY_LOCAL_API_KEY");
+    assert_eq!(j["models"], 1, "空模型名应被过滤: {j}");
+    let on_disk = std::fs::read_to_string(dir.join("config.yaml")).unwrap();
+    assert!(on_disk.contains("http://127.0.0.1:9/v1"), "{on_disk}");
+    assert!(on_disk.contains("vendor: custom"), "{on_disk}");
+    // 自定义端点默认放开私有地址（本机/局域网服务）
+    assert!(on_disk.contains("allow_private: true"), "{on_disk}");
+    assert!(!on_disk.contains("k-custom"));
+    let env = std::fs::read_to_string(dir.join("env")).unwrap();
+    assert!(env.contains("BUFFET_MY_LOCAL_API_KEY=k-custom"));
+    let (code, rows) = call(st, LB, "GET", "/api/providers", None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["id"] == "my-local"));
+}
+
+#[tokio::test]
+async fn custom_provider_rejects_bad_inputs() {
+    let (st, dir) = state_for("custbad");
+    for body in [
+        // 缺 Base URL
+        serde_json::json!({"vendor": "custom", "plan": "custom", "api_key": "k", "id": "x"}),
+        // 非法 id（含空格/斜杠）
+        serde_json::json!({"vendor": "custom", "plan": "custom", "api_key": "k", "id": "x y", "base_url": "http://127.0.0.1:9/v1"}),
+        // 非 http(s) 协议
+        serde_json::json!({"vendor": "custom", "plan": "custom", "api_key": "k", "id": "x", "base_url": "ftp://127.0.0.1/v1"}),
+    ] {
+        let (code, j) = call(st.clone(), LB, "POST", "/_admin/provider", Some(body)).await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{j}");
+    }
+    // 均未写盘、无备份、无 env
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.yaml")).unwrap(),
+        CFG
+    );
+    assert!(!dir.join("config.yaml.bak").exists());
+    assert!(!dir.join("env").exists());
+}
+
+#[tokio::test]
 async fn non_loopback_forbidden() {
     let (st, _d) = state_for("guard");
     let (code, _) = call(

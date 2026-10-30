@@ -953,6 +953,13 @@ struct ProviderAdd {
     vendor: String,
     plan: String,
     api_key: String,
+    /// 自定义服务商才用：provider id / 端点 / 模型清单（目录厂商忽略这三个字段）。
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    models: Vec<String>,
 }
 
 /// 把 `NAME=VALUE` 写入 env 文件（systemd EnvironmentFile 格式），同名行替换。
@@ -1016,19 +1023,47 @@ async fn provider_add(
     if api_keys.is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "API Key 不能为空".into());
     }
-    let Some((pid, plan)) = vendors::lookup(&body.vendor, &body.plan) else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("厂商/套餐不存在: {}/{}", body.vendor, body.plan),
-        );
+    // 自定义服务商：端点、id、模型全来自请求；目录厂商仍按 (vendor, plan) 查目录。
+    let (pid, vendor_name, base_url, mut models) = if body.vendor == vendors::CUSTOM {
+        let id = body.id.trim().to_string();
+        if !vendors::valid_custom_id(&id) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "自定义服务商 ID 只能包含字母、数字、- 和 _，且不能为空".into(),
+            );
+        }
+        let url = body.base_url.trim().to_string();
+        match reqwest::Url::parse(&url) {
+            Ok(u) if u.scheme() == "http" || u.scheme() == "https" => {}
+            _ => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Base URL 必须是 http(s) 地址".into(),
+                )
+            }
+        }
+        let models: Vec<String> = body
+            .models
+            .iter()
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .collect();
+        (id, vendors::CUSTOM.to_string(), url, models)
+    } else {
+        let Some((pid, plan)) = vendors::lookup(&body.vendor, &body.plan) else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("厂商/套餐不存在: {}/{}", body.vendor, body.plan),
+            );
+        };
+        (pid, body.vendor.clone(), plan.base_url, plan.models)
     };
     let env_name = vendors::env_name(&pid);
     // 目录未给默认模型（如 OpenRouter）：先用 Key 试拉 /models，失败不阻断添加。
-    let mut models = plan.models.clone();
     let mut free: Vec<String> = Vec::new();
     let mut extra_warnings: Vec<String> = Vec::new();
     if models.is_empty() {
-        match fetch_models_list(&st, &plan.base_url, &env_name, Some(&api_keys[0])).await {
+        match fetch_models_list(&st, &base_url, &env_name, Some(&api_keys[0])).await {
             Ok(pairs) => {
                 models = pairs.iter().map(|(m, _)| m.clone()).collect();
                 free = pairs
@@ -1085,7 +1120,7 @@ async fn provider_add(
     let mut updated = false;
     for item in list.iter_mut() {
         if yaml_str(item, "id").as_deref() == Some(pid.as_str()) {
-            item["base_url"] = serde_yaml::Value::String(plan.base_url.clone());
+            item["base_url"] = serde_yaml::Value::String(base_url.clone());
             item["api_key_env"] = serde_yaml::Value::String(env_name.clone());
             item["models"] = seq_of_strings(&models);
             if free.is_empty() {
@@ -1105,11 +1140,11 @@ async fn provider_add(
         );
         map.insert(
             serde_yaml::Value::String("vendor".into()),
-            serde_yaml::Value::String(body.vendor.clone()),
+            serde_yaml::Value::String(vendor_name.clone()),
         );
         map.insert(
             serde_yaml::Value::String("base_url".into()),
-            serde_yaml::Value::String(plan.base_url.clone()),
+            serde_yaml::Value::String(base_url.clone()),
         );
         map.insert(
             serde_yaml::Value::String("api_key_env".into()),
@@ -1119,6 +1154,13 @@ async fn provider_add(
             serde_yaml::Value::String("models".into()),
             seq_of_strings(&models),
         );
+        // 自定义端点常是局域网/本机服务（如 LM Studio、vLLM），默认放开私有地址。
+        if vendor_name == vendors::CUSTOM {
+            map.insert(
+                serde_yaml::Value::String("allow_private".into()),
+                serde_yaml::Value::Bool(true),
+            );
+        }
         if !free.is_empty() {
             map.insert(
                 serde_yaml::Value::String("free_models".into()),
