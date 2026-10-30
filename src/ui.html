@@ -214,6 +214,17 @@ details.adv .adv-body { padding: 0 18px 16px; }
 .ag-path:hover { color: var(--text); border-color: #2a3548; }
 .ag-warn { border: 1px solid #4a3d1e; background: #1d1810; color: var(--warn); border-radius: 8px;
   padding: 8px 12px; font-size: 12px; margin: 10px 0; line-height: 1.6; }
+/* 接入器：使用模型按故障转移次序自上而下排列，序号即先后 */
+.ag-mlist { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.ag-mlist .ag-mrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--dim2);
+  background: #0c1015; border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; }
+.ag-mlist .ag-mrow:first-child { border-color: #2b4a76; }
+.ag-mlist .ag-mrow code { font-family: ui-monospace, Consolas, monospace; color: var(--text);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-mlist .ftag { flex: 0 0 auto; white-space: nowrap; }
+.ag-mlist .ag-mord { flex: 0 0 auto; min-width: 16px; height: 16px; border-radius: 50%; background: var(--active);
+  color: var(--dim2); font-size: 10.5px; display: inline-flex; align-items: center; justify-content: center; }
+.ag-mlist .ag-mrow:first-child .ag-mord { color: var(--text); }
 @media (max-width: 980px) { .ag-layout { grid-template-columns: 1fr; } }
 .gcard .grip { cursor: grab; color: var(--dim); user-select: none; font-size: 14px; flex: 0 0 auto; }
 #gl-tip { position: fixed; z-index: 99999; display: none; pointer-events: none; background: #1f2b45; color: var(--fg); border: 1px solid #354564; padding: 5px 10px; border-radius: 7px; font-size: 12px; line-height: 1.5; max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
@@ -1391,8 +1402,9 @@ function agModelsCell(gname) {
   if (!g || !g.members.length) return `<span class="muted">-</span>`;
   const ms = g.members.filter(m => !m.disabled);
   if (!ms.length) return `<span class="muted">${esc(L("成员已全部停用", "all members disabled"))}</span>`;
-  return `<div style="display:flex;flex-wrap:wrap;gap:3px">` + ms.map(m =>
-    `<span class="chip" title="${esc(m.provider)}">${esc(m.provider)}/${esc(m.model)}${isFreeM(m.provider, m.model) ? freeTag() : ""}</span>`).join("") + `</div>`;
+  // 按优先级从上到下排，序号就是请求时的尝试次序
+  return `<div class="ag-mlist">` + ms.map((m, i) =>
+    `<div class="ag-mrow"><span class="ag-mord">${i + 1}</span><code>${esc(m.provider)}/${esc(m.model)}</code>${isFreeM(m.provider, m.model) ? freeTag() : ""}</div>`).join("") + `</div>`;
 }
 function drawAgents() {
   const segs = [];
@@ -1478,7 +1490,8 @@ function drawAgentDetail() {
   $("ag-detail").innerHTML = head + `
     <label class="f" style="margin-top:14px"><span>${esc(L("路由组", "Routing group"))}</span>
       <select id="ag-grp-sel">${opts.map(n => `<option value="${esc(n)}" ${n === selg ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
-    <div class="mrow"><span class="muted">${esc(t("ag.models"))}</span><span id="ag-grp-models">${agModelsCell(selg)}</span></div>
+    <div class="muted" style="margin:2px 0 6px">${esc(t("ag.models"))}</div>
+    <div id="ag-grp-models">${agModelsCell(selg)}</div>
     <div class="toolbar" style="margin:12px 0 0">
       <button class="btn sm" id="ag-prev-btn">${esc(L("预览变更", "Preview"))}</button>
       <button class="btn sm primary" id="ag-attach-btn">${esc(it.attached ? L("重新接入", "Re-attach") : L("接入", "Attach"))}</button>
