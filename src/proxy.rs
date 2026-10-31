@@ -225,21 +225,26 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
         Err(e) => return json_error(e.status(), &e.to_string()),
     };
 
-    // 运行时过滤：degraded / 熔断 open / 额度耗尽
+    // 运行时过滤：degraded / 熔断 open / 额度耗尽。
+    // 候选已按 priority 排序；被隔离的候选先单独记下，稍后按原始优先级顺序
+    // 并回路由链——若像以前那样边过滤边写链，跳过的候选会全部挤在链首，
+    // 看起来像被优先尝试过（例如 priority=1 的 Qiniu 成功，链却显示
+    // opencode-zen:open → Qiniu:ok）。
     let ratio = snap.raw.gateway.conservative_quota_ratio;
     let now = now_epoch_secs();
-    let mut avail: Vec<(&router::Candidate, &Provider)> = Vec::new();
-    let mut chain: Vec<String> = Vec::new();
-    for c in &candidates {
+    let mut avail: Vec<(&router::Candidate, &Provider, usize)> = Vec::new();
+    let mut skips: Vec<(usize, String)> = Vec::new();
+    for (idx, c) in candidates.iter().enumerate() {
         let Some(p) = snap.providers.get(&c.provider_id) else {
             continue;
         };
         match state.states.availability(&c.provider_id, p, ratio, now) {
-            Ok(()) => avail.push((c, p)),
-            Err(u) => chain.push(format!("{}:{}", p.id, u.tag())),
+            Ok(()) => avail.push((c, p, idx)),
+            Err(u) => skips.push((idx, format!("{}:{}", p.id, u.tag()))),
         }
     }
     if avail.is_empty() {
+        let chain: Vec<String> = skips.iter().map(|(_, s)| s.clone()).collect();
         let mut resp = json_error(
             503,
             &format!(
@@ -261,7 +266,7 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
     }
     // OpenCode Zen/Go 套餐要求 x-opencode-session 头（上游按其做路由亲和）；
     // 客户端未携带时注入每进程稳定的会话 ID，否则上游以 400 MissingSessionID 拒绝。
-    if avail.iter().any(|(_, p)| p.vendor == "opencode")
+    if avail.iter().any(|(_, p, _)| p.vendor == "opencode")
         && !base_headers.contains_key(header::HeaderName::from_static("x-opencode-session"))
     {
         if let Ok(v) = HeaderValue::from_str(opencode_session_id()) {
@@ -274,8 +279,15 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
     let mut last_err: Option<(u16, String)> = None;
     let mut attempts = 0u32;
     let mut last_prov: Option<(String, String)> = None;
+    let mut chain: Vec<String> = Vec::new();
+    let mut skip_i = 0usize;
 
-    for (c, p) in avail.into_iter().take(max_attempts) {
+    for (c, p, idx) in avail.into_iter().take(max_attempts) {
+        // 先把排在当前候选之前、但被运行时隔离的候选按优先级补进链。
+        while skip_i < skips.len() && skips[skip_i].0 < idx {
+            chain.push(skips[skip_i].1.clone());
+            skip_i += 1;
+        }
         attempts += 1;
         last_prov = Some((p.id.clone(), c.model.clone()));
         // 上游 model 可能被 group/ 虚拟模型改写为成员自己的 model
@@ -355,6 +367,11 @@ pub async fn handle(state: Arc<AppState>, req: Request) -> Response<Body> {
                 last_err = Some(fail.last);
             }
         }
+    }
+
+    // 尝试次数用尽：把尚未记录的隔离候选补到链尾，保持优先级顺序。
+    for (_, s) in skips.iter().skip(skip_i) {
+        chain.push(s.clone());
     }
 
     // 候选耗尽：返回最后一次错误，并记一条失败事件（tokens 0）

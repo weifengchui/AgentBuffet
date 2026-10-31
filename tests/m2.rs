@@ -403,6 +403,38 @@ async fn circuit_breaker_isolates_and_recovers() {
 }
 
 #[tokio::test]
+async fn skipped_candidates_keep_priority_order_after_success() {
+    let (mock, _ms) = spawn_mock().await;
+    let client = reqwest::Client::new();
+
+    // 高优先级先成功：排在后面的隔离候选不应被预置到链首。
+    let yaml = gw_config(
+        &[
+            prov("good-1", &mock, &["ok-chat"], None),
+            prov("zero-1", &mock, &["ok-chat"], Some(0)),
+        ],
+        &[(1, "good-1", "ok-chat"), (2, "zero-1", "ok-chat")],
+    );
+    let gw = spawn_gateway(&yaml).await;
+    let r = post_group(&client, &gw, false).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(chain_of(&r), "good-1:ok", "成功后的隔离项不应写入链");
+
+    // 隔离项优先级更高时，仍按优先级排在成功项之前。
+    let yaml2 = gw_config(
+        &[
+            prov("good-1", &mock, &["ok-chat"], None),
+            prov("zero-1", &mock, &["ok-chat"], Some(0)),
+        ],
+        &[(1, "zero-1", "ok-chat"), (2, "good-1", "ok-chat")],
+    );
+    let gw2 = spawn_gateway(&yaml2).await;
+    let r2 = post_group(&client, &gw2, false).await;
+    assert_eq!(r2.status(), StatusCode::OK);
+    assert_eq!(chain_of(&r2), "zero-1:quota,good-1:ok");
+}
+
+#[tokio::test]
 async fn auth_401_marks_degraded_and_skips_afterwards() {
     let (mock, ms) = spawn_mock().await;
     let yaml = gw_config(
