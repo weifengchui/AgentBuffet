@@ -1597,7 +1597,9 @@ fn hm_render_all(home: &Path, target: &Target) -> Result<Vec<(PathBuf, String, S
         let new_text = if p == active {
             hm_render_at(&text, target, &url)?
         } else {
-            hm_upsert_custom_at(&text, target, &url)
+            // 非活跃档保持用户当前的模型选择，只纠正我们写过、会导致请求失败或串档的字段。
+            let fixed = hm_normalize_owned_at(&text, &url);
+            hm_upsert_custom_at(&fixed, target, &url)
         };
         out.push((p, text, new_text));
     }
@@ -1635,7 +1637,45 @@ fn hm_get(lines: &[&str], key: &str) -> Option<String> {
 
 fn hm_has_ours(text: &str) -> bool {
     let lines: Vec<&str> = text.lines().collect();
-    hm_get(&lines, "provider").as_deref() == Some(PROVIDER_NAME)
+    // 旧版接入写过 `custom:agentbuffet`，两种写法都视为 AgentBuffet 自己接管。
+    matches!(hm_get(&lines, "provider").as_deref(), Some(PROVIDER_NAME) | Some("custom:agentbuffet"))
+}
+
+/// 非活跃配置档的就地纠正：不重写模型选择，只修两处会出问题的字段——
+/// 1. `base_url` 指回带档名的路径，避免用量串到基础实例；
+/// 2. `model.default` 去掉 `agentbuffet/` 前缀（Hermes 原样上送，网关只认 `group/<组名>`）。
+fn hm_normalize_owned_at(text: &str, base_url: &str) -> String {
+    if !hm_has_ours(text) {
+        return text.to_string();
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let Some((s, e)) = hm_model_block(&lines) else {
+        return text.to_string();
+    };
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i > s && i < e {
+            let t = line.trim();
+            let indent = &line[..line.len() - line.trim_start().len()];
+            if t.starts_with("base_url:") {
+                out.push(format!("{indent}base_url: {base_url}"));
+                continue;
+            }
+            if let Some(v) = t.strip_prefix("default:") {
+                let v = v.trim().trim_matches('"').trim_matches('\'');
+                if let Some(rest) = v.strip_prefix(&format!("{PROVIDER_NAME}/")) {
+                    out.push(format!("{indent}default: {rest}"));
+                    continue;
+                }
+            }
+        }
+        out.push(line.to_string());
+    }
+    let mut res = out.join("\n");
+    if text.ends_with('\n') {
+        res.push('\n');
+    }
+    res
 }
 
 fn hm_drifted_at(text: &str, base_url: &str) -> bool {
@@ -2055,6 +2095,38 @@ mod tests {
         // 写入后活跃档不应被判漂移（期望地址按档名计算）。
         let s = detect(&home, &target);
         assert!(s.attached && !s.drifted, "{}", s.note);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 非活跃档若是我们接管的 provider：只纠正 base_url 与 model.default 的旧写法，
+    /// 用户选的模型名保持原样。
+    #[test]
+    fn apply_hermes_normalizes_inactive_owned_profile() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-profile-fix");
+        let root = home.join(".hermes");
+        let active = root.join("profiles").join("liteguard").join("config.yaml");
+        let study = root.join("profiles").join("study").join("config.yaml");
+        std::fs::create_dir_all(active.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(study.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "liteguard\n").unwrap();
+        std::fs::write(&active, "model:\n  provider: x\n").unwrap();
+        std::fs::write(
+            &study,
+            "model:\n  provider: agentbuffet\n  base_url: http://x/hermes/v1\n  default: agentbuffet/group/默认\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        let target = hermes_target("hermes");
+        apply(&home, &target).unwrap();
+        let t = std::fs::read_to_string(&study).unwrap();
+        assert!(
+            t.contains("base_url: http://127.0.0.1:3425/hermes~profile:study/v1")
+                || t.contains("base_url: \"http://127.0.0.1:3425/hermes~profile:study/v1\""),
+            "{t}"
+        );
+        assert!(t.contains("default: group/默认"), "旧前缀应被去掉: {t}");
+        assert!(!t.contains("agentbuffet/group/默认"), "{t}");
         let _ = std::fs::remove_dir_all(&home);
     }
 
