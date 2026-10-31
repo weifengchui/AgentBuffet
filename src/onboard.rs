@@ -110,8 +110,25 @@ impl Target {
     /// 路径前缀承载 agent id（`/<agent-id>/v1`），因此 WSL 里的实例与本机实例
     /// 在网关侧天然分开统计；WSL 里访问网关的主机地址按其网络模式修正。
     pub fn base_url(&self) -> String {
+        self.base_url_for_profile("default")
+    }
+    /// Hermes 配置档对应的用量 id：默认档沿用实例 id，其余档追加
+    /// `~profile:<名称>`，网关按路径前缀分开统计各档。
+    pub fn agent_id_for_profile(&self, profile: &str) -> String {
+        if profile == "default" {
+            return self.agent_id.clone();
+        }
+        format!("{}~profile:{}", self.agent_id, profile_slug(profile))
+    }
+    /// 指定配置档的注入地址。主机修正仍按原始实例 id 计算——复合 id 不在运行
+    /// 环境注册表里，直接查会丢掉 WSL/Windows 侧的主机地址修正。
+    pub fn base_url_for_profile(&self, profile: &str) -> String {
         let addr = scope::gateway_addr_for(&self.agent_id, &self.gateway_addr, &home_dir());
-        format!("http://{}/{}/v1", addr, self.agent_id)
+        format!(
+            "http://{}/{}/v1",
+            addr,
+            self.agent_id_for_profile(profile)
+        )
     }
     pub fn model_pointer(&self) -> String {
         format!("{PROVIDER_NAME}/group/{}", self.default_group)
@@ -496,7 +513,9 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
             s.installed = !locs.is_empty();
             if let Ok(text) = std::fs::read_to_string(&p) {
                 s.attached = hm_has_ours(&text);
-                s.drifted = s.attached && hm_drifted(&text, target);
+                // 活跃档按档名计算期望地址（非默认档的路径 id 带 `~profile:<名>`）。
+                let want = target.base_url_for_profile(&hm_profile_label(&p));
+                s.drifted = s.attached && hm_drifted_at(&text, &want);
                 if s.drifted {
                     let lines: Vec<&str> = text.lines().collect();
                     let file_url = hm_get(&lines, "base_url");
@@ -1539,6 +1558,11 @@ fn hm_profile_label(path: &Path) -> String {
     }
 }
 
+/// 配置档名压成可安全放进 URL 路径段的 slug（保留大小写与 `-` `.` `_`）。
+fn profile_slug(label: &str) -> String {
+    scope::slug(label.trim())
+}
+
 fn hm_has_custom(text: &str) -> bool {
     text.lines().any(|l| {
         l.trim()
@@ -1568,10 +1592,12 @@ fn hm_render_all(home: &Path, target: &Target) -> Result<Vec<(PathBuf, String, S
     for p in files {
         let text =
             std::fs::read_to_string(&p).map_err(|e| format!("读取 {} 失败: {e}", p.display()))?;
+        // 每个配置档用带档名的路径 id，网关侧按 profile 分开统计用量。
+        let url = target.base_url_for_profile(&hm_profile_label(&p));
         let new_text = if p == active {
-            hm_render(&text, target)?
+            hm_render_at(&text, target, &url)?
         } else {
-            hm_upsert_custom(&text, target)
+            hm_upsert_custom_at(&text, target, &url)
         };
         out.push((p, text, new_text));
     }
@@ -1612,20 +1638,24 @@ fn hm_has_ours(text: &str) -> bool {
     hm_get(&lines, "provider").as_deref() == Some(PROVIDER_NAME)
 }
 
-fn hm_drifted(text: &str, target: &Target) -> bool {
+fn hm_drifted_at(text: &str, base_url: &str) -> bool {
     let lines: Vec<&str> = text.lines().collect();
-    hm_get(&lines, "base_url").as_deref() != Some(target.base_url().as_str())
+    hm_get(&lines, "base_url").as_deref() != Some(base_url)
 }
 
-/// 行级手术：只替换/插入 model 块内 provider/base_url/api_key/default 四键，
-/// 其余行逐字节保留（不重排、不丢注释）。
+/// 默认档注入（测试与默认档路径用）。
+#[cfg(test)]
 fn hm_render(text: &str, target: &Target) -> Result<String, String> {
+    hm_render_at(text, target, &target.base_url())
+}
+
+fn hm_render_at(text: &str, target: &Target, base_url: &str) -> Result<String, String> {
     let lines: Vec<&str> = text.lines().collect();
     let (s, e) =
         hm_model_block(&lines).ok_or_else(|| "配置缺少顶层 model: 块，拒绝写入".to_string())?;
     let want: [(&str, String); 4] = [
         ("provider", PROVIDER_NAME.to_string()),
-        ("base_url", target.base_url()),
+        ("base_url", base_url.to_string()),
         ("api_key", KEY_PLACEHOLDER.to_string()),
         ("default", target.model_pointer()),
     ];
@@ -1665,12 +1695,12 @@ fn hm_render(text: &str, target: &Target) -> Result<String, String> {
     }
     // Hermes 的「选择模型」列表只认识内置 provider 与 custom_providers 里的条目；
     // 只写 model.* 会让 AgentBuffet 在 picker 中不可见，所以同时登记一个命名条目。
-    Ok(hm_upsert_custom(&res, target))
+    Ok(hm_upsert_custom_at(&res, target, base_url))
 }
 
 /// 把 AgentBuffet 登记到顶层 `custom_providers:`（已存在则原地替换），其余行保持不变。
 /// idempotent：重复调用不会追加多条。
-fn hm_upsert_custom(text: &str, target: &Target) -> String {
+fn hm_upsert_custom_at(text: &str, target: &Target, base_url: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let start = lines
         .iter()
@@ -1679,7 +1709,7 @@ fn hm_upsert_custom(text: &str, target: &Target) -> String {
         // 没有该段：追加到文件末尾
         let mut out = text.trim_end().to_string();
         out.push_str("\ncustom_providers:\n");
-        out.push_str(&hm_custom_item("  ", target));
+        out.push_str(&hm_custom_item_at("  ", target, base_url));
         out.push('\n');
         return out;
     };
@@ -1703,7 +1733,7 @@ fn hm_upsert_custom(text: &str, target: &Target) -> String {
         for (i, l) in lines.iter().enumerate() {
             if i == start {
                 out.push("custom_providers:".to_string());
-                out.extend(hm_custom_item("  ", target).lines().map(str::to_string));
+                out.extend(hm_custom_item_at("  ", target, base_url).lines().map(str::to_string));
             } else {
                 out.push(l.to_string());
             }
@@ -1736,7 +1766,7 @@ fn hm_upsert_custom(text: &str, target: &Target) -> String {
         }
         for (i, l) in lines.iter().enumerate() {
             if i == s0 {
-                out.extend(hm_custom_item(&indent, target).lines().map(str::to_string));
+                out.extend(hm_custom_item_at(&indent, target, base_url).lines().map(str::to_string));
             } else if i > s0 && i < e0 {
                 continue;
             } else {
@@ -1761,7 +1791,7 @@ fn hm_upsert_custom(text: &str, target: &Target) -> String {
         for (i, l) in lines.iter().enumerate() {
             out.push(l.to_string());
             if i == at {
-                out.extend(hm_custom_item(&indent, target).lines().map(str::to_string));
+                out.extend(hm_custom_item_at(&indent, target, base_url).lines().map(str::to_string));
             }
         }
     }
@@ -1773,14 +1803,13 @@ fn hm_upsert_custom(text: &str, target: &Target) -> String {
 }
 
 /// 单个命名条目（name 固定为 agentbuffet，模型指向默认路由组）。
-fn hm_custom_item(indent: &str, target: &Target) -> String {
+fn hm_custom_item_at(indent: &str, target: &Target, base_url: &str) -> String {
     let pad = format!("{indent}  ");
     format!(
         "{indent}- name: {PROVIDER_NAME}\n\
-         {pad}base_url: \"{}\"\n\
+         {pad}base_url: \"{base_url}\"\n\
          {pad}api_key: {KEY_PLACEHOLDER}\n\
          {pad}model: \"group/{}\"",
-        target.base_url(),
         target.default_group
     )
 }
@@ -1987,6 +2016,43 @@ mod tests {
             .contains(&format!("provider: {PROVIDER_NAME}")));
         assert!(std::fs::read_to_string(&other).unwrap().contains("provider: z"));
         assert!(!empty.exists(), "没有配置文件的档不应被新建: {}", empty.display());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 每个配置档写入带档名的路径 id，网关侧按 profile 分开统计用量。
+    #[test]
+    fn apply_hermes_splits_usage_by_profile() {
+        enable_isolation_for_tests();
+        let home = tmp_home("hm-profile-split");
+        let root = home.join(".hermes");
+        let active = root.join("profiles").join("study").join("config.yaml");
+        let other = root.join("profiles").join("agentlink").join("config.yaml");
+        std::fs::create_dir_all(active.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(root.join("active_profile"), "study\n").unwrap();
+        std::fs::write(&active, "model:\n  provider: x\n").unwrap();
+        std::fs::write(&other, "model:\n  provider: z\n").unwrap();
+        std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
+        let target = hermes_target("hermes");
+        apply(&home, &target).unwrap();
+        let def = std::fs::read_to_string(root.join("config.yaml")).unwrap();
+        let study = std::fs::read_to_string(&active).unwrap();
+        let link = std::fs::read_to_string(&other).unwrap();
+        assert!(
+            def.contains(&format!("base_url: \"{}\"", target.base_url())),
+            "{def}"
+        );
+        assert!(
+            study.contains("hermes~profile:study/v1"),
+            "活跃档应带档名: {study}"
+        );
+        assert!(
+            link.contains("hermes~profile:agentlink/v1"),
+            "非活跃档也应带档名: {link}"
+        );
+        // 写入后活跃档不应被判漂移（期望地址按档名计算）。
+        let s = detect(&home, &target);
+        assert!(s.attached && !s.drifted, "{}", s.note);
         let _ = std::fs::remove_dir_all(&home);
     }
 

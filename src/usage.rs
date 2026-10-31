@@ -96,6 +96,43 @@ impl Counters {
     }
 }
 
+/// 时间轴单个桶的汇总；`agents` 为桶内各 Agent 的请求次数（堆叠柱）。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BucketStat {
+    pub t: u64,
+    pub requests: u64,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cost_est: f64,
+    pub failures: u64,
+    pub agents: HashMap<String, u64>,
+}
+
+/// (agent, model, provider) 维度在查询区间内的汇总（明细表格与占比图）。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MatrixRow {
+    pub agent: String,
+    pub model: String,
+    pub provider: String,
+    pub requests: u64,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cost_est: f64,
+    pub failures: u64,
+    pub duration_ms: u64,
+}
+
+/// `/api/usage/stats` 返回体：时间桶序列 + agent/model 矩阵。
+#[derive(Debug, Clone, Serialize)]
+pub struct Stats {
+    pub from: u64,
+    pub to: u64,
+    pub bucket: u64,
+    pub totals: Counters,
+    pub buckets: Vec<BucketStat>,
+    pub matrix: Vec<MatrixRow>,
+}
+
 /// 用量记录器：JSONL 落盘 + 内存 counters + 单价表。
 pub struct Usage {
     logs_dir: PathBuf,
@@ -213,6 +250,89 @@ impl Usage {
         out.reverse();
         out
     }
+
+    /// 区间 [from, to) 的统计聚合：按 `bucket` 秒对齐出时间桶，并给出
+    /// (agent, model, provider) 矩阵。只读覆盖该区间的日文件，坏行跳过。
+    /// `bucket` 最小 60 秒；桶数量上限 4000（超大区间自动放大桶宽）。
+    pub fn stats(&self, from: u64, to: u64, bucket: u64) -> Stats {
+        let to = to.max(from);
+        let bucket = bucket.max((to - from) / 4000 + 1).max(60);
+        let aligned = from - from % bucket;
+        let n = ((to - aligned + bucket - 1) / bucket) as usize;
+        let mut buckets: Vec<BucketStat> = (0..n)
+            .map(|i| BucketStat {
+                t: aligned + i as u64 * bucket,
+                ..Default::default()
+            })
+            .collect();
+        let mut totals = Counters::default();
+        let mut matrix: HashMap<(String, String, String), MatrixRow> = HashMap::new();
+
+        let mut day = aligned / 86_400 * 86_400;
+        while day <= to {
+            let path = self.day_file(day);
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for line in text.lines() {
+                    let Ok(ev) = serde_json::from_str::<Event>(line.trim()) else {
+                        continue;
+                    };
+                    if ev.ts < from || ev.ts >= to {
+                        continue;
+                    }
+                    let idx = ((ev.ts - aligned) / bucket) as usize;
+                    if let Some(b) = buckets.get_mut(idx) {
+                        b.requests += 1;
+                        b.prompt_tokens += ev.prompt_tokens;
+                        b.completion_tokens += ev.completion_tokens;
+                        if let Some(c) = ev.cost_est {
+                            b.cost_est += c;
+                        }
+                        if ev.status >= 400 {
+                            b.failures += 1;
+                        }
+                        *b.agents.entry(ev.agent.clone()).or_default() += 1;
+                    }
+                    totals.apply(&ev);
+                    let row = matrix
+                        .entry((ev.agent.clone(), ev.model.clone(), ev.provider.clone()))
+                        .or_insert_with(|| MatrixRow {
+                            agent: ev.agent.clone(),
+                            model: ev.model.clone(),
+                            provider: ev.provider.clone(),
+                            ..Default::default()
+                        });
+                    row.requests += 1;
+                    row.prompt_tokens += ev.prompt_tokens;
+                    row.completion_tokens += ev.completion_tokens;
+                    row.duration_ms += ev.duration_ms;
+                    if let Some(c) = ev.cost_est {
+                        row.cost_est += c;
+                    }
+                    if ev.status >= 400 {
+                        row.failures += 1;
+                    }
+                }
+            }
+            day += 86_400;
+        }
+
+        let mut matrix: Vec<MatrixRow> = matrix.into_values().collect();
+        matrix.sort_by(|a, b| {
+            b.requests
+                .cmp(&a.requests)
+                .then(a.agent.cmp(&b.agent))
+                .then(a.model.cmp(&b.model))
+                .then(a.provider.cmp(&b.provider))
+        });
+        Stats {
+            from,
+            to,
+            bucket,
+            totals,
+            buckets,
+            matrix,
+        }
+    }
 }
 
 /// epoch 秒 → "YYYY-MM-DD"（UTC）。days→civil 自算（Howard Hinnant 算法），不引 chrono。
@@ -304,6 +424,57 @@ mod tests {
         assert_eq!(one.completion_tokens, 10);
         assert_eq!(one.failures, 1);
         assert_eq!(one.cost_est, 0.0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stats_buckets_matrix_across_days() {
+        let dir = std::env::temp_dir().join(format!("buffet-usage-stats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let logs = dir.join("logs");
+        let prices = dir.join("no-such-prices.yaml");
+        let u = Usage::new(logs, &prices);
+        // 两天：day0 的 01:00 与 02:00，day1 的 01:00，按 1 小时桶聚合。
+        let day0 = 86_400 * 20_000;
+        let mk = |ts: u64, agent: &str, model: &str, status: u16| Event {
+            ts,
+            agent: agent.into(),
+            group: "g".into(),
+            provider: "p1".into(),
+            model: model.into(),
+            status,
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            cost_est: Some(0.01),
+            duration_ms: 100,
+            retries: 0,
+            fail_chain: vec!["p1:ok".into()],
+        };
+        u.record(&mk(day0 + 3600, "hermes", "m1", 200));
+        u.record(&mk(day0 + 3600, "hermes", "m1", 500));
+        u.record(&mk(day0 + 7200, "claude", "m2", 200));
+        u.record(&mk(day0 + 86_400 + 3600, "hermes", "m2", 200));
+
+        let s = u.stats(day0, day0 + 2 * 86_400, 3600);
+        assert_eq!(s.bucket, 3600);
+        assert_eq!(s.buckets.len(), 48);
+        assert_eq!(s.buckets[1].t, day0 + 3600);
+        assert_eq!(s.buckets[1].requests, 2);
+        assert_eq!(s.buckets[1].failures, 1);
+        assert_eq!(s.buckets[1].agents["hermes"], 2);
+        assert_eq!(s.buckets[2].requests, 1);
+        assert_eq!(s.buckets[25].requests, 1);
+        assert_eq!(s.buckets[0].requests, 0);
+        assert_eq!(s.totals.requests, 4);
+        assert_eq!(s.totals.prompt_tokens, 40);
+        assert_eq!(s.matrix.len(), 3);
+        assert_eq!(s.matrix[0].requests, 2);
+        assert_eq!(s.matrix[0].agent, "hermes");
+        assert_eq!(s.matrix[0].model, "m1");
+        assert_eq!(s.matrix[0].duration_ms, 200);
+        // 非法桶宽被抬到最小值，且空区间不产生桶。
+        assert_eq!(u.stats(day0, day0, 10).bucket, 60);
+        assert!(u.stats(day0, day0, 10).buckets.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

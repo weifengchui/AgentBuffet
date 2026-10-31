@@ -135,11 +135,21 @@ pub fn resolve(
         let group = match snap.agents.get(agent_id) {
             Some(a) => a.default_group.clone(),
             None => {
-                // unidentified 或未知 agent：无 default_group，要求用 group/
-                return Err(RouteError::Bad(format!(
-                    "未知 agent \"{agent_id}\" 无默认路由组，请用 group/<name> 指定；可用组: {}",
-                    group_list(snap)
-                )));
+                // Hermes 配置档（`hermes@wsl:Ubuntu-24.04~profile:study`）沿用
+                // 基础实例的路由组：只有用量统计按完整 id 分开，路由行为不变。
+                match agent_id
+                    .split_once("~profile:")
+                    .and_then(|(base, _)| snap.agents.get(base))
+                {
+                    Some(a) => a.default_group.clone(),
+                    // unidentified 或未知 agent：无 default_group，要求用 group/
+                    None => {
+                        return Err(RouteError::Bad(format!(
+                            "未知 agent \"{agent_id}\" 无默认路由组，请用 group/<name> 指定；可用组: {}",
+                            group_list(snap)
+                        )));
+                    }
+                }
             }
         };
         let members: Vec<&crate::config::Member> = snap
@@ -240,5 +250,41 @@ mod tests {
 
         let (a2, _) = parse_path("/hermes%40wsl%3AUbuntu/v1/chat/completions").unwrap();
         assert_eq!(a2, "hermes@wsl:Ubuntu");
+    }
+
+    const MINI_CONFIG: &str = r#"
+gateway:
+  addr: "127.0.0.1:0"
+  ui_addr: "127.0.0.1:0"
+providers:
+  - id: p1
+    vendor: mock
+    base_url: "http://127.0.0.1:1/v1"
+    api_key_env: K1
+    allow_private: true
+    models: [m-a]
+routing_groups:
+  - name: g
+    strategy: order
+    members:
+      - { provider: p1, model: m-a, priority: 1 }
+agents:
+  - { id: "hermes@wsl:Ubuntu-24.04", default_group: g }
+"#;
+
+    /// Hermes 配置档的复合 id 沿用基础实例的路由组（用量仍按完整 id 分开统计）。
+    #[test]
+    fn resolve_profile_id_inherits_base_agent_group() {
+        let snap = crate::config::load_str(MINI_CONFIG, "test.yaml").unwrap();
+        let (group, cands) = resolve(&snap, "hermes@wsl:Ubuntu-24.04~profile:study", "m-a").unwrap();
+        assert_eq!(group, "g");
+        assert_eq!(cands.len(), 1);
+
+        // 未登记的普通 agent 仍按原规则报错。
+        let err = match resolve(&snap, "unknown", "m-a") {
+            Err(e) => e,
+            Ok(_) => panic!("未登记 agent 应报错"),
+        };
+        assert!(err.to_string().contains("未知 agent"));
     }
 }

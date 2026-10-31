@@ -538,6 +538,21 @@ async fn api_json_shapes() {
     assert_eq!(recent[0]["ts"], base + 5); // 取尾 20 且保持时间序
     assert_eq!(recent[19]["ts"], base + 24);
 
+    let (code, j) = call(
+        st.clone(),
+        LB,
+        "GET",
+        &format!("/api/usage/stats?from={}&to={}&bucket=3600", base - 10, base + 30),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(j["totals"]["requests"], 25);
+    assert_eq!(j["matrix"].as_array().unwrap().len(), 1);
+    assert_eq!(j["matrix"][0]["agent"], "hermes");
+    assert_eq!(j["matrix"][0]["requests"], 25);
+    assert!(j["buckets"].as_array().unwrap().len() <= 4000);
+
     let (code, j) = call(st.clone(), LB, "GET", "/api/providers", None).await;
     assert_eq!(code, StatusCode::OK);
     let arr = j.as_array().unwrap();

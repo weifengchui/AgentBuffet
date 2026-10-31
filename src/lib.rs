@@ -13,7 +13,7 @@ pub mod usage;
 pub mod vendors;
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Json, Path as AxPath, Request, State};
+use axum::extract::{ConnectInfo, Json, Path as AxPath, Query, Request, State};
 use axum::http::{header, HeaderValue, Response, StatusCode};
 use axum::routing::{get, post};
 use axum::Router;
@@ -42,6 +42,7 @@ pub fn build_admin_router(state: Arc<proxy::AppState>) -> Router {
     Router::new()
         .route("/", get(ui_index))
         .route("/api/overview", get(overview))
+        .route("/api/usage/stats", get(usage_stats))
         .route("/api/providers", get(providers_view))
         .route("/api/routing", get(routing_view))
         .route("/api/agents", get(agents_view))
@@ -162,6 +163,62 @@ async fn overview(
             "date": usage::utc_date(now),
             "totals": totals,
             "recent": recent,
+        }),
+    )
+}
+
+/// `?from=&to=&bucket=`（秒）。缺省最近 7 天、1 小时桶；区间受保留天数约束。
+#[derive(Debug, Deserialize)]
+struct StatsQuery {
+    from: Option<u64>,
+    to: Option<u64>,
+    bucket: Option<u64>,
+}
+
+/// 各 Agent / 模型的使用统计：时间桶序列（堆叠柱）+ (agent, model, provider) 矩阵。
+async fn usage_stats(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(st): State<Arc<proxy::AppState>>,
+    Query(q): Query<StatsQuery>,
+) -> Response<Body> {
+    if let Some(r) = guard(peer) {
+        return r;
+    }
+    let now = failover::now_epoch_secs();
+    let retain_days = {
+        let snap = st.snap.read().await;
+        snap.raw.gateway.log_retain_days.max(1) as u64
+    };
+    // 允许 1 天的未来偏差（客户端时钟/测试），同时避免超大区间反复读日文件。
+    let to = q.to.unwrap_or(now).min(now + 86_400);
+    let from = q
+        .from
+        .unwrap_or(to.saturating_sub(7 * 86_400))
+        .max(now.saturating_sub(retain_days * 86_400))
+        .min(to);
+    let bucket = q.bucket.unwrap_or(3_600);
+    let stats = match &st.usage {
+        Some(u) => u.stats(from, to, bucket),
+        None => usage::Stats {
+            from,
+            to,
+            bucket,
+            totals: usage::Counters::default(),
+            buckets: Vec::new(),
+            matrix: Vec::new(),
+        },
+    };
+    json_response(
+        StatusCode::OK,
+        serde_json::json!({
+            "now": now,
+            "retain_days": retain_days,
+            "from": stats.from,
+            "to": stats.to,
+            "bucket": stats.bucket,
+            "totals": stats.totals,
+            "buckets": stats.buckets,
+            "matrix": stats.matrix,
         }),
     )
 }

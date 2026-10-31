@@ -160,6 +160,61 @@ label.ck input { width: auto; accent-color: var(--accent); }
 #modal-x:hover { color: var(--text); background: var(--card2); }
 #modal-body { padding: 16px 18px; max-height: 66vh; overflow-y: auto; }
 #modal-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+#modal-box.wide { width: 1120px; }
+
+/* ---------------- agent 使用统计（概览 → 统计弹层） ---------------- */
+.st-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.st-seg { display: inline-flex; background: #0c1015; border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
+.st-seg button { background: none; border: none; color: var(--dim2); font: inherit; font-size: 12px;
+  padding: 4px 11px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.st-seg button:hover { color: var(--text); }
+.st-seg button.on { background: var(--active); color: var(--accent2); }
+.st-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.st-card { background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.st-card .k { color: var(--dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-card .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
+.st-card .v small { font-size: 11px; font-weight: 400; color: var(--dim); margin-left: 4px; }
+.st-chart { position: relative; border: 1px solid var(--line); border-radius: 10px; background: #0a0e15;
+  padding: 4px 4px 2px; }
+.st-svg { display: block; width: 100%; height: auto; touch-action: none; user-select: none; cursor: crosshair; }
+.st-tip { position: absolute; z-index: 30; display: none; pointer-events: none; background: #1f2b45;
+  border: 1px solid #354564; border-radius: 8px; padding: 7px 10px; font-size: 12px; line-height: 1.55;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45); white-space: nowrap; }
+.st-tip b { color: var(--text); font-weight: 600; }
+.st-hint { margin: 7px 2px 14px; }
+.st-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.st-side { background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+.st-subh { display: flex; align-items: center; gap: 8px; color: var(--dim2); font-size: 12px;
+  font-weight: 600; letter-spacing: .3px; margin-bottom: 9px; }
+.st-subh .muted { font-weight: 400; margin-left: auto; }
+.st-alist { display: flex; flex-direction: column; gap: 4px; max-height: 292px; overflow-y: auto; margin: -4px -6px 0; padding: 4px 6px; }
+.st-arow { padding: 7px 9px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+.st-arow:hover { background: #0f1725; }
+.st-arow.on { background: var(--active); border-color: #27406b; }
+.st-ar1 { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.st-ar1 i { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.st-ar1 b { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-ar1 .n { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
+.st-ar1 .s { color: var(--accent2); font-size: 11.5px; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.st-ar2 { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.st-ar2 .bar { height: 4px; }
+.st-ar2 .t2 { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-ar2 .bar i { background: var(--accent); }
+.st-mrow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #161d29; font-size: 12.5px; }
+.st-mrow:last-child { border-bottom: none; }
+.st-mrow i { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.st-mrow code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: 12px; }
+.st-mrow .pv { color: var(--dim); font-size: 11px; white-space: nowrap; }
+.st-mrow .n { color: var(--text); font-variant-numeric: tabular-nums; }
+.st-mrow .s { color: var(--accent2); font-size: 11.5px; min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+.st-donut-wrap { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.st-donut { flex: 0 0 auto; }
+.st-donut text { font-family: inherit; }
+.st-mlist { flex: 1; min-width: 0; max-height: 226px; overflow-y: auto; }
+.st-empty { border: 1px dashed #2a3548; border-radius: 10px; padding: 22px 12px; text-align: center;
+  color: var(--dim); font-size: 12px; }
+@media (max-width: 900px) { .st-cols { grid-template-columns: 1fr; } .st-donut-wrap { flex-direction: column; } }
 #toasts { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 200;
   display: flex; flex-direction: column; gap: 8px; align-items: center; max-width: min(92vw, 620px); }
 .toast { background: var(--card); border: 1px solid #263041; border-left-width: 3px; border-radius: 10px;
@@ -295,7 +350,13 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
           <div class="muted" id="ov-map-lg" style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
         </div>
         <div class="panel">
-          <h3 data-i18n="ov.recent"></h3>
+          <h3 style="display:flex;align-items:center;gap:8px">
+            <span data-i18n="ov.recent"></span>
+            <button class="btn sm ghost" onclick="openStats()">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align:-2px;margin-right:3px"><path d="M4 20V11M10 20V4M16 20v-6M22 20V8"/></svg>
+              <span data-i18n="ov.stats"></span>
+            </button>
+          </h3>
           <div class="muted" data-i18n="ov.recentHint"></div>
           <div id="ov-recent-wrap">
           <table><thead><tr>
@@ -411,7 +472,7 @@ const I18N = {
     "col.time": "时间", "col.group": "组", "col.provider": "服务商", "col.status": "状态",
     "col.tokens": "Tokens", "col.cost": "费用", "col.dur": "耗时", "col.chain": "路由链", "col.ops": "操作",
     "ov.req": "今日请求", "ov.pt": "输入 Tokens", "ov.ct": "输出 Tokens", "ov.cost": "费用估算",
-    "ov.recent": "最近请求", "ov.recentHint": "按 UTC 日期统计，展示最近 20 条",
+    "ov.recent": "最近请求", "ov.recentHint": "按 UTC 日期统计，展示最近 20 条", "ov.stats": "Agent 统计",
     "ov.map": "链路星图", "ov.mapHint": "在线 Agent → 网关 → 服务商的实时链路；光点代表最近 60 秒内的请求",
     "pv.add": "添加服务商", "pv.hint": "API Key 仅存于本机 env 文件（0600），绝不写入配置",
     "rt.add": "新建路由组", "rt.hint": "组内按优先级依次尝试，失败自动转移到下一成员",
@@ -444,7 +505,7 @@ const I18N = {
     "col.time": "Time", "col.group": "Group", "col.provider": "Provider", "col.status": "Status",
     "col.tokens": "Tokens", "col.cost": "Cost", "col.dur": "Duration", "col.chain": "Routing chain", "col.ops": "Actions",
     "ov.req": "Requests today", "ov.pt": "Prompt tokens", "ov.ct": "Completion tokens", "ov.cost": "Est. cost",
-    "ov.recent": "Recent requests", "ov.recentHint": "UTC day, last 20 requests",
+    "ov.recent": "Recent requests", "ov.recentHint": "UTC day, last 20 requests", "ov.stats": "Agent stats",
     "ov.map": "Link star map", "ov.mapHint": "Live agent → gateway → provider links; photons mark requests from the last 60 seconds",
     "pv.add": "Add provider", "pv.hint": "API keys live only in the local env file (0600), never in config",
     "rt.add": "New group", "rt.hint": "Members are tried by priority with automatic failover",
@@ -563,11 +624,13 @@ function toast(msg, type = "info") {
   setTimeout(() => { d.style.opacity = "0"; d.style.transition = "opacity .3s"; }, 3500);
   setTimeout(() => d.remove(), 3900);
 }
-function openModal(title, body, foot) {
+function openModal(title, body, foot, wide) {
   cbClose();
   $("modal-title").textContent = title;
   $("modal-body").innerHTML = body;
   $("modal-foot").innerHTML = foot;
+  $("modal-foot").style.display = foot ? "" : "none";
+  $("modal-box").classList.toggle("wide", !!wide);
   $("modal-mask").classList.add("on");
 }
 function closeModal() { cbClose(); $("modal-mask").classList.remove("on"); }
@@ -646,7 +709,7 @@ function renderOverview(j) {
   $("ov-ct").textContent = fmt(j.totals.completion_tokens);
   $("ov-cost").textContent = "$" + (j.totals.cost_est ?? 0).toFixed(4);
   $("ov-recent").innerHTML = (j.recent || []).map(e => `<tr>
-    <td class="muted">${tstr(e.ts)}</td><td>${esc(e.agent)}</td><td>${esc(e.group)}</td>
+    <td class="muted">${tstr(e.ts)}</td><td>${esc(agentShow(e.agent))}</td><td>${esc(e.group)}</td>
     <td>${esc(e.provider)}</td><td>${esc(e.model)}${isFreeM(e.provider, e.model) ? freeTag() : ""}</td>
     <td><span class="pill ${e.status < 400 ? "on" : "off"}"><i></i>${e.status}</span></td>
     <td class="muted">${fmt(e.prompt_tokens)} / ${fmt(e.completion_tokens)}</td>
@@ -673,6 +736,8 @@ const photons = []; let phRaf = null;
 const hashK = (s) => { let h = 17; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 2654435761); return Math.abs(h); };
 const PAL = ["#38d6e6", "#c77dff", "#43d97b", "#ffb347", "#7fb0ff", "#ff5c7a", "#3fd0a0", "#f97fd0", "#9d7bff", "#5cc8ff"];
 const palOf = (s) => PAL[hashK(String(s)) % PAL.length];
+// Hermes 配置档：`hermes@wsl:Ubuntu~profile:study` → `hermes@wsl:Ubuntu · study`
+const agentShow = (k) => { const s = String(k ?? ""), i = s.indexOf("~profile:"); return i > 0 ? `${s.slice(0, i)} · ${s.slice(i + 9)}` : s; };
 const ctrl = (p1, p2, k) => { const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2, dx = p2.x - p1.x, dy = p2.y - p1.y, L = Math.hypot(dx, dy) || 1, bow = 24 + (hashK(k) % 20); return { x: mx + (-dy / L) * bow, y: my + (dx / L) * bow }; };
 const chanD = (p1, c, p2) => `M ${p1.x} ${p1.y} Q ${c.x} ${c.y} ${p2.x} ${p2.y}`;
 const qp = (p1, c, p2, u) => { const it = 1 - u; return { x: it * it * p1.x + 2 * it * u * c.x + u * u * p2.x, y: it * it * p1.y + 2 * it * u * c.y + u * u * p2.y }; };
@@ -775,6 +840,349 @@ function phTick() {
     p.el.setAttribute("cx", pt.x); p.el.setAttribute("cy", pt.y);
   }
   phRaf = photons.length ? requestAnimationFrame(phTick) : null;
+}
+
+// ---------------- agent 使用统计（概览 → 统计弹层） ----------------
+const SST = { preset: 7, from: 0, to: 0, bucket: 0, ov: null, detail: null,
+  brush: [0, 0], agent: null, drag: null, seq: 0, bmap: null, grid: null, lastUp: 0 };
+const stTwo = (n) => String(n).padStart(2, "0");
+const stDT = (ts) => { const d = new Date(ts * 1000);
+  return `${d.getFullYear()}-${stTwo(d.getMonth() + 1)}-${stTwo(d.getDate())} ${stTwo(d.getHours())}:${stTwo(d.getMinutes())}`; };
+const stShortT = (ts) => { const d = new Date(ts * 1000);
+  return `${stTwo(d.getMonth() + 1)}-${stTwo(d.getDate())} ${stTwo(d.getHours())}:${stTwo(d.getMinutes())}`; };
+const stTick = (ts) => { const d = new Date(ts * 1000); return `${stTwo(d.getMonth() + 1)}-${stTwo(d.getDate())}`; };
+const stHM = (ts) => { const d = new Date(ts * 1000); return `${stTwo(d.getHours())}:${stTwo(d.getMinutes())}`; };
+const stBucketFor = (span) => span <= 3 * 3600 ? 300 : span <= 2 * 86400 ? 3600 : span <= 12 * 86400 ? 7200 : 21600;
+const stBucketLabel = (b) => b < 3600 ? `${Math.round(b / 60)} ${L("分钟", "min")}`
+  : b < 86400 ? `${Math.round(b / 3600)} ${L("小时", "h")}` : `${Math.round(b / 86400)} ${L("天", "d")}`;
+const stTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M"
+  : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k" : fmt(n);
+const stPct = (x) => (x * 100).toFixed(x >= 0.1 ? 1 : 2) + "%";
+// 刻度步长（1/2/3/5 × 10^n），保证 y 轴网格线取整数且是等分。
+const stStepN = (v) => { if (v <= 1) return 1; const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 3 ? 3 : m <= 5 ? 5 : 10) * p; };
+
+function stGrid() {
+  const ov = SST.ov, b = ov.bucket, t0 = ov.from - ov.from % b;
+  const n = Math.max(1, Math.ceil((ov.to - t0) / b));
+  return { t0, n, b, span: n * b };
+}
+
+function openStats() {
+  const now = Math.floor(Date.now() / 1000);
+  SST.preset = 7; SST.agent = null; SST.ov = null; SST.detail = null; SST.drag = null; SST.grid = null; SST.lastUp = 0;
+  SST.to = now; SST.from = now - 7 * 86400; SST.brush = [SST.from, SST.to];
+  openModal(L("Agent 使用统计", "Agent usage statistics"), `
+    <div class="st-top"><div class="st-seg" id="st-seg"></div><span class="muted" id="st-range"></span>
+      <span style="margin-left:auto"></span>
+      <button class="btn ghost sm" onclick="stReset()" title="${esc(L("恢复到完整区间", "Reset to full range"))}">⟲ ${esc(L("重置", "Reset"))}</button>
+      <button class="btn ghost sm" onclick="stLoadOverview()">↻ ${esc(L("刷新", "Refresh"))}</button></div>
+    <div class="st-cards" id="st-cards"></div>
+    <div class="st-chart"><svg id="st-svg" class="st-svg" viewBox="0 0 1000 170"></svg><div id="st-tip" class="st-tip"></div></div>
+    <div class="st-hint muted">${esc(L("拖拽时间轴选择区间：拖两端缩放、拖选区内平移、在选区外拖拽重新框选、双击重置；统计桶按 UTC 对齐。", "Drag the timeline to select a range: edges resize, inside pans, outside starts a new selection, double-click resets. Buckets align to UTC."))}</div>
+    <div class="st-cols">
+      <div class="st-side"><div class="st-subh"><span>${esc(L("Agent 使用", "Agent usage"))}</span><span class="muted" id="st-agsum"></span></div><div class="st-alist" id="st-agents"></div></div>
+      <div class="st-side"><div class="st-subh"><span>${esc(L("模型分布", "Model breakdown"))}</span><span class="muted" id="st-mdsum"></span></div><div id="st-models"></div></div>
+    </div>`, "", true);
+  stRenderSeg();
+  stLoadOverview();
+}
+
+function stRenderSeg() {
+  const el = $("st-seg"); if (!el) return;
+  el.innerHTML = [[1, L("24 小时", "24 h")], [7, L("7 天", "7 days")], [30, L("30 天", "30 days")]]
+    .map(([n, lb]) => `<button class="${SST.preset === n ? "on" : ""}" onclick="stSetPreset(${n})">${esc(lb)}</button>`).join("");
+}
+function stSetPreset(n) { SST.preset = n; SST.agent = null; stRenderSeg(); stLoadOverview(); }
+
+async function stLoadOverview() {
+  const now = Math.floor(Date.now() / 1000);
+  SST.to = now; SST.from = now - SST.preset * 86400;
+  const seq = ++SST.seq;
+  const bucket = stBucketFor(SST.to - SST.from);
+  try {
+    const j = await api(`/api/usage/stats?from=${SST.from}&to=${SST.to}&bucket=${bucket}`);
+    if (seq !== SST.seq || !$("st-svg")) return; // 已被更新的请求取代 / 弹层已关闭
+    SST.ov = j; SST.from = j.from; SST.to = j.to; SST.bucket = j.bucket;
+    SST.brush = [j.from, j.to]; SST.agent = null;
+    SST.bmap = new Map((j.buckets || []).map(b => [b.t, b]));
+    stRenderTimeline();
+    stShowDetail(j);
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+async function stLoadDetail() {
+  const ov = SST.ov; if (!ov || !$("st-svg")) return;
+  const a = Math.round(SST.brush[0]), c = Math.round(SST.brush[1]);
+  if (a === ov.from && c === ov.to) { SST.detail = ov; stShowDetail(ov); return; }
+  const seq = ++SST.seq;
+  const cards = $("st-cards"); if (cards) cards.style.opacity = ".45";
+  try {
+    const j = await api(`/api/usage/stats?from=${a}&to=${c}&bucket=${stBucketFor(c - a)}`);
+    if (seq !== SST.seq || !$("st-svg")) return;
+    SST.detail = j;
+    stShowDetail(j);
+  } catch (e) { toast(e.message, "bad"); }
+  finally { if (seq === SST.seq && $("st-cards")) $("st-cards").style.opacity = ""; }
+}
+
+function stSnapBrush() {
+  const { t0, b, span } = stGrid(), tEnd = t0 + span;
+  let [a, c] = SST.brush;
+  a = Math.max(t0, a); c = Math.min(tEnd, c);
+  if (c - a < b) { const mid = (a + c) / 2; a = Math.floor(mid / b) * b; c = a + b; }
+  if (c > tEnd) { c = tEnd; a = Math.max(t0, tEnd - b); }
+  SST.brush = [Math.round(a), Math.round(c)];
+}
+
+function stRenderRange() {
+  const el = $("st-range"); if (!el || !SST.ov) return;
+  el.textContent = `${stDT(SST.brush[0])} → ${stDT(SST.brush[1])} · ${L("时间桶", "bucket")} ${stBucketLabel(SST.ov.bucket)}`;
+}
+
+function stRenderTimeline() {
+  const ov = SST.ov, svg = $("st-svg"); if (!ov || !svg) return;
+  const W = 1000, H = 170, TOP = 10, BOT = 22, plotH = H - TOP - BOT;
+  const { t0, n, b, span } = stGrid();
+  const bw = W / n, map = SST.bmap || new Map();
+  let maxR = 1;
+  for (let i = 0; i < n; i++) { const d = map.get(t0 + i * b); if (d) maxR = Math.max(maxR, d.requests); }
+  const ymax = stStepN(maxR / 4) * 4;
+  let h = "";
+  for (let g = 0; g <= 4; g++) {
+    const y = TOP + plotH - plotH * g / 4;
+    h += `<line x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}" stroke="#1c2330"/>`;
+    h += `<text x="2" y="${(y - 4).toFixed(1)}" fill="#7d8aa0" font-size="10">${fmt(ymax * g / 4)}</text>`;
+  }
+  for (let i = 0; i < n; i++) {
+    const d = map.get(t0 + i * b); if (!d || !d.requests) continue;
+    const x = i * bw + Math.min(1.2, bw * 0.1);
+    const w = Math.max(1, bw - Math.min(2.4, bw * 0.2));
+    const ags = Object.entries(d.agents || {}).sort((p1, p2) => p2[1] - p1[1]);
+    let acc = 0;
+    for (const [ag, cnt] of ags) {
+      const hh = plotH * cnt / ymax;
+      const y = TOP + plotH - acc - hh;
+      h += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0.4, hh).toFixed(1)}" fill="${palOf(ag)}" rx="${bw > 6 ? 1 : 0}"/>`;
+      acc += hh;
+    }
+  }
+  const lab = (ts) => (ov.to - ov.from) <= 2 * 86400 ? stHM(ts) : stTick(ts);
+  for (let k = 0; k <= 4; k++) {
+    const i = Math.round((n - 1) * k / 4), x = Math.min(W - 2, Math.max(2, i * bw + bw / 2));
+    const anc = k === 0 ? "start" : k === 4 ? "end" : "middle";
+    h += `<text x="${x.toFixed(1)}" y="${H - 5}" fill="#7d8aa0" font-size="10" text-anchor="${anc}">${lab(t0 + i * b + b / 2)}</text>`;
+  }
+  const xa = Math.max(0, Math.min(W, (SST.brush[0] - t0) / span * W));
+  const xb = Math.max(0, Math.min(W, (SST.brush[1] - t0) / span * W));
+  h += `<rect x="0" y="0" width="${xa.toFixed(1)}" height="${H}" fill="rgba(6,9,14,.66)"/>`;
+  h += `<rect x="${xb.toFixed(1)}" y="0" width="${(W - xb).toFixed(1)}" height="${H}" fill="rgba(6,9,14,.66)"/>`;
+  h += `<rect x="${xa.toFixed(1)}" y="0" width="${Math.max(0, xb - xa).toFixed(1)}" height="${H}" fill="rgba(79,140,255,.06)" stroke="#4f8cff" stroke-width="1"/>`;
+  h += `<rect x="${(xa - 2.5).toFixed(1)}" y="0" width="5" height="${H}" fill="rgba(79,140,255,.4)" rx="2"/>`;
+  h += `<rect x="${(xb - 2.5).toFixed(1)}" y="0" width="5" height="${H}" fill="rgba(79,140,255,.4)" rx="2"/>`;
+  h += `<rect id="st-cross" x="0" y="0" width="1" height="${H}" fill="rgba(180,210,255,.5)" style="display:none"/>`;
+  svg.innerHTML = h;
+  SST.grid = { t0, n, b, span, W, H };
+  stRenderRange();
+  stBindTimeline();
+}
+
+function stBindTimeline() {
+  const svg = $("st-svg"); if (!svg || !SST.ov) return;
+  const g = SST.grid;
+  const xOf = (e) => { const r = svg.getBoundingClientRect(); return (e.clientX - r.left) / Math.max(1, r.width) * g.W; };
+  const tOf = (x) => g.t0 + Math.max(0, Math.min(g.W, x)) / g.W * g.span;
+  const edges = () => ({ l: (SST.brush[0] - g.t0) / g.span * g.W, r: (SST.brush[1] - g.t0) / g.span * g.W });
+  svg.onpointerdown = (e) => {
+    if (!SST.ov) return;
+    const dbl = SST.lastUp && Date.now() - SST.lastUp < 360;
+    SST.lastUp = 0;
+    if (dbl) { stReset(); e.preventDefault(); return; }
+    const x = xOf(e), ed = edges();
+    // 选区铺满整段时，"移动"没有可平移空间：直接在按下点重新框选，避免拖拽无效。
+    const full = (SST.brush[1] - SST.brush[0]) >= g.span - g.b * 1.5;
+    let mode = "new";
+    if (Math.abs(x - ed.l) <= 9) mode = "l";
+    else if (Math.abs(x - ed.r) <= 9) mode = "r";
+    else if (!full && x > ed.l && x < ed.r) mode = "move";
+    SST.drag = { mode, x0: x, a0: SST.brush[0], b0: SST.brush[1] };
+    if (mode === "new") { SST.brush = [tOf(x), tOf(x)]; stRenderTimeline(); }
+    try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+    stHideTip();
+  };
+  svg.onpointermove = (e) => {
+    const x = xOf(e), d = SST.drag;
+    if (!d) {
+      const ed = edges();
+      svg.style.cursor = (Math.abs(x - ed.l) <= 9 || Math.abs(x - ed.r) <= 9) ? "col-resize"
+        : (x > ed.l && x < ed.r ? "grab" : "crosshair");
+      stHover(e, x); return;
+    }
+    svg.style.cursor = d.mode === "move" ? "grabbing" : "col-resize";
+    const dt = (x - d.x0) / g.W * g.span, minS = Math.max(g.b, 60);
+    let [a, c] = SST.brush;
+    if (d.mode === "new") { const ta = tOf(d.x0), tc = tOf(x); a = Math.min(ta, tc); c = Math.max(ta, tc); }
+    else if (d.mode === "l") { a = Math.max(g.t0, Math.min(tOf(x), d.b0 - minS)); c = d.b0; }
+    else if (d.mode === "r") { a = d.a0; c = Math.min(g.t0 + g.span, Math.max(tOf(x), d.a0 + minS)); }
+    else {
+      const wdt = d.b0 - d.a0; a = d.a0 + dt; c = d.b0 + dt;
+      if (a < g.t0) { a = g.t0; c = a + wdt; }
+      if (c > g.t0 + g.span) { c = g.t0 + g.span; a = c - wdt; }
+    }
+    SST.brush = [a, c];
+    stRenderTimeline();
+  };
+  svg.onpointerup = (e) => {
+    const d = SST.drag; SST.drag = null;
+    try { svg.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (!d) return;
+    // 未产生位移的点击计入双击判定（pointerdown 里自行识别，避免依赖浏览器 dblclick）。
+    SST.lastUp = Math.abs(xOf(e) - d.x0) < 4 ? Date.now() : 0;
+    stSnapBrush();
+    stRenderTimeline();
+    stLoadDetail();
+  };
+  svg.onpointerleave = () => { if (!SST.drag) stHideTip(); };
+  svg.ondblclick = () => stReset();
+}
+
+function stReset() {
+  if (!SST.ov) return;
+  SST.seq++; // 丢弃尚未返回的区间明细请求，避免覆盖重置结果
+  SST.brush = [SST.ov.from, SST.ov.to];
+  stRenderTimeline();
+  SST.detail = SST.ov; stShowDetail(SST.ov);
+}
+
+function stHideTip() {
+  const tip = $("st-tip"); if (!tip) return;
+  tip.style.display = "none";
+  const cross = $("st-cross"); if (cross) cross.style.display = "none";
+}
+
+function stHover(e, x) {
+  const tip = $("st-tip"), g = SST.grid, map = SST.bmap;
+  if (!tip || !g || !SST.ov) return;
+  const i = Math.max(0, Math.min(g.n - 1, Math.floor(x / g.W * g.n)));
+  const cross = $("st-cross");
+  if (cross) { cross.setAttribute("x", (i * g.W / g.n).toFixed(1)); cross.style.display = "block"; }
+  const d = map.get(g.t0 + i * g.b);
+  if (!d || !d.requests) { tip.style.display = "none"; return; }
+  const ags = Object.entries(d.agents || {}).sort((p1, p2) => p2[1] - p1[1]).slice(0, 3)
+    .map(([k, v]) => `${esc(agentShow(k))} ×${v}`).join(" · ");
+  tip.innerHTML = `<b>${esc(stShortT(g.t0 + i * g.b))}</b> · ${fmt(d.requests)} ${esc(L("请求", "req"))}<br>${ags}<br>
+    <span style="color:#7d8aa0">${fmt(d.prompt_tokens)} / ${fmt(d.completion_tokens)} tok · $${(d.cost_est || 0).toFixed(4)}${d.failures ? " · " + esc(L("失败", "fail")) + " " + d.failures : ""}</span>`;
+  tip.style.display = "block";
+  const gr = tip.parentElement.getBoundingClientRect();
+  let lx = e.clientX - gr.left + 14;
+  if (lx + tip.offsetWidth > gr.width - 4) lx = e.clientX - gr.left - tip.offsetWidth - 14;
+  tip.style.left = Math.max(2, lx) + "px";
+  tip.style.top = Math.max(2, e.clientY - gr.top - tip.offsetHeight - 10) + "px";
+}
+
+function stAgg(rows, dim) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = r[dim];
+    let a = m.get(k);
+    if (!a) { a = { key: k, requests: 0, prompt_tokens: 0, completion_tokens: 0, cost_est: 0, failures: 0, duration_ms: 0 }; m.set(k, a); }
+    a.requests += r.requests || 0; a.prompt_tokens += r.prompt_tokens || 0;
+    a.completion_tokens += r.completion_tokens || 0; a.cost_est += r.cost_est || 0;
+    a.failures += r.failures || 0; a.duration_ms += r.duration_ms || 0;
+  }
+  return [...m.values()].sort((x, y) => y.requests - x.requests);
+}
+
+function stAggModel(rows) {
+  const m = new Map();
+  for (const r of rows) {
+    let a = m.get(r.model);
+    if (!a) { a = { key: r.model, requests: 0, prompt_tokens: 0, completion_tokens: 0, cost_est: 0, failures: 0, providers: new Map() }; m.set(r.model, a); }
+    a.requests += r.requests || 0; a.prompt_tokens += r.prompt_tokens || 0;
+    a.completion_tokens += r.completion_tokens || 0; a.cost_est += r.cost_est || 0;
+    a.failures += r.failures || 0;
+    a.providers.set(r.provider, (a.providers.get(r.provider) || 0) + (r.requests || 0));
+  }
+  return [...m.values()].sort((x, y) => y.requests - x.requests);
+}
+
+function stShowDetail(resp) {
+  if (!resp || !$("st-cards")) return;
+  SST.detail = resp;
+  const t = resp.totals || {}, m = resp.matrix || [];
+  const ags = stAgg(m, "agent"), req = t.requests || 0, fails = t.failures || 0;
+  const rate = req ? fails / req : 0;
+  $("st-cards").innerHTML = `
+    <div class="st-card"><div class="k">${esc(L("请求数", "Requests"))}</div><div class="v">${fmt(req)}</div></div>
+    <div class="st-card"><div class="k">${esc(L("活跃 Agent", "Active agents"))}</div><div class="v">${ags.length}</div></div>
+    <div class="st-card"><div class="k">${esc(L("Tokens 输入 / 输出", "Tokens in / out"))}</div><div class="v">${stTok(t.prompt_tokens || 0)}<small>/ ${stTok(t.completion_tokens || 0)}</small></div></div>
+    <div class="st-card"><div class="k">${esc(L("费用估算", "Est. cost"))}</div><div class="v">$${(t.cost_est || 0).toFixed(4)}</div></div>
+    <div class="st-card"><div class="k">${esc(L("失败率", "Failure rate"))}</div><div class="v"${rate ? ' style="color:var(--off)"' : ""}>${(rate * 100).toFixed(rate >= 0.01 ? 1 : 2)}%<small>${fmt(fails)}</small></div></div>`;
+  stRenderAgents();
+  stRenderModels();
+}
+
+function stRenderAgents() {
+  const rows = stAgg((SST.detail || {}).matrix || [], "agent");
+  const total = rows.reduce((s, x) => s + x.requests, 0), sel = SST.agent;
+  if ($("st-agsum")) $("st-agsum").textContent = L(`${rows.length} 个`, `${rows.length} total`);
+  if (!$("st-agents")) return;
+  $("st-agents").innerHTML = rows.map(a => {
+    const share = total ? a.requests / total : 0;
+    const ok = a.requests ? (a.requests - a.failures) / a.requests : 1;
+    const avg = a.requests ? Math.round(a.duration_ms / a.requests) : 0;
+    return `<div class="st-arow ${sel === a.key ? "on" : ""}" onclick="stPickAgent(${esc(JSON.stringify(a.key))})">
+      <div class="st-ar1"><i style="background:${palOf(a.key)}"></i><b>${esc(agentShow(a.key))}</b>
+        <span class="n">${fmt(a.requests)}</span><span class="s">${stPct(share)}</span></div>
+      <div class="st-ar2"><div class="bar"><i style="width:${(share * 100).toFixed(2)}%;background:${palOf(a.key)}"></i></div>
+        <span class="t2">${stTok(a.prompt_tokens)} / ${stTok(a.completion_tokens)} tok · $${a.cost_est.toFixed(3)} · ${avg} ms · ${(ok * 100).toFixed(1)}%</span></div>
+    </div>`;
+  }).join("") || `<div class="st-empty">${esc(L("该时段没有请求", "No requests in this range"))}</div>`;
+}
+
+function stPickAgent(k) {
+  SST.agent = SST.agent === k ? null : k;
+  stRenderAgents();
+  stRenderModels();
+}
+
+function stRenderModels() {
+  const sel = SST.agent;
+  const rows = stAggModel(((SST.detail || {}).matrix || []).filter(r => !sel || r.agent === sel));
+  const total = rows.reduce((s, x) => s + x.requests, 0);
+  if ($("st-mdsum")) $("st-mdsum").textContent = sel ? L(`仅 ${agentShow(sel)}`, `only ${agentShow(sel)}`) : L("全部 Agent", "all agents");
+  if (!$("st-models")) return;
+  if (!rows.length) { $("st-models").innerHTML = `<div class="st-empty">${esc(L("该时段没有请求", "No requests in this range"))}</div>`; return; }
+  const top = rows.slice(0, 7).map((x, i) => ({ ...x, color: PAL[i % PAL.length] }));
+  const rest = rows.slice(7);
+  if (rest.length) {
+    top.push({ key: L("其他", "Other"), requests: rest.reduce((s, x) => s + x.requests, 0),
+      color: "#50607a", others: true, providers: new Map() });
+  }
+  const D = 132, R = 50, C = 2 * Math.PI * R, cx = D / 2, cy = D / 2;
+  let off = 0, arcs = "";
+  for (const s of top) {
+    const len = total ? s.requests / total * C : 0;
+    const gap = top.length > 1 ? Math.min(2.5, len / 3) : 0;
+    if (len > 0.2) arcs += `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${s.color}" stroke-width="13"
+      stroke-dasharray="${Math.max(0.2, len - gap).toFixed(2)} ${(C - Math.max(0.2, len - gap)).toFixed(2)}"
+      stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})">
+      <title>${esc(s.key)} · ${fmt(s.requests)} · ${stPct(s.requests / total)}</title></circle>`;
+    off += len;
+  }
+  const list = top.map(s => `<div class="st-mrow"><i style="background:${s.color}"></i><code>${esc(s.key)}</code>
+    ${s.others ? "" : `<span class="pv">${esc(stProv(s))}</span>`}<span class="n">${fmt(s.requests)}</span>
+    <span class="s">${stPct(s.requests / total)}</span></div>`).join("");
+  $("st-models").innerHTML = `<div class="st-donut-wrap"><svg class="st-donut" width="${D}" height="${D}" viewBox="0 0 ${D} ${D}">
+    ${arcs}<text x="${cx}" y="${cy - 2}" text-anchor="middle" fill="#dbe2ea" font-size="17" font-weight="600">${fmt(total)}</text>
+    <text x="${cx}" y="${cy + 15}" text-anchor="middle" fill="#7d8aa0" font-size="10">${esc(L("请求", "requests"))}</text></svg>
+    <div class="st-mlist">${list}</div></div>`;
+}
+
+function stProv(x) {
+  const ps = [...(x.providers || new Map()).entries()].sort((a, b) => b[1] - a[1]);
+  return ps.length ? ps[0][0] + (ps.length > 1 ? ` +${ps.length - 1}` : "") : "";
 }
 </script>
 <script>
