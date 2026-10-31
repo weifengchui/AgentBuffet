@@ -1657,7 +1657,9 @@ fn hm_render_at(text: &str, target: &Target, base_url: &str) -> Result<String, S
         ("provider", PROVIDER_NAME.to_string()),
         ("base_url", base_url.to_string()),
         ("api_key", KEY_PLACEHOLDER.to_string()),
-        ("default", target.model_pointer()),
+        // Hermes 直接把 model.default 原样发给网关：这里必须是网关认识的
+        // `group/<组名>`，写成 `agentbuffet/group/<组名>` 会被判为未知 model。
+        ("default", format!("group/{}", target.default_group)),
     ];
     let indent = lines[s + 1..e]
         .iter()

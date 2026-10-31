@@ -1026,7 +1026,7 @@ fn hermes_attach_detect_revert() {
     );
     assert!(text.contains("  provider: agentbuffet"));
     assert!(text.contains("  api_key: agentbuffet"));
-    assert!(text.contains("  default: agentbuffet/group/g"));
+    assert!(text.contains("  default: group/g"));
     // model 块之外的行逐字节保留
     assert!(text.contains("fallback_providers: []"));
     assert!(text.contains("  - hermes-cli"));
