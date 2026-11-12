@@ -30,3 +30,12 @@ render _src-glow.png agentbuffet-mark-glow.svg
 render _src-mono.png agentbuffet-mark-mono.svg
 
 python "$DST/export-icons.py"
+
+# GitHub Pages 只发布 docs/ 目录，正本里的 ../assets/... 线上取不到；
+# 这里把站点要用的那批图标镜像进 docs/favicon/，避免两份手工同步。
+PUB="$ROOT/../../docs/favicon"
+mkdir -p "$PUB"
+cp -f "$DST"/favicon.svg "$DST"/favicon.ico "$DST"/favicon-*.png \
+  "$DST"/apple-touch-icon.png "$DST"/icon-192.png "$DST"/icon-512.png "$PUB/"
+cp -f "$ROOT/site.webmanifest" "$ROOT/../../docs/site.webmanifest"
+echo "mirrored $(ls "$PUB" | wc -l) files into docs/favicon/"

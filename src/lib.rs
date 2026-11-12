@@ -2563,7 +2563,22 @@ mod brand_assets_tests {
             2,
             "导航与页脚两处 logo 都该引用共享渐变"
         );
-        assert!(page.contains("assets/logo/favicon/favicon.svg"));
+        assert!(
+            page.contains("\"favicon/favicon.svg\""),
+            "Pages 只发布 docs/，图标须走 docs 内的镜像路径"
+        );
+        assert!(!page.contains("../assets/"), "不该再引用 docs 外的正本路径");
+        let mirrored =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/favicon/favicon.svg");
+        if std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs")
+            .exists()
+        {
+            assert!(
+                mirrored.exists(),
+                "docs/favicon/ 镜像缺失，跑一次 assets/logo/export-icons.sh"
+            );
+        }
         assert!(!page.contains("<span class=\"mark\">B</span>"));
     }
 }

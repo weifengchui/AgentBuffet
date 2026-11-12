@@ -2,7 +2,7 @@
   "name": "AgentBuffet",
   "short_name": "AgentBuffet",
   "description": "本地 AI 模型自助餐台：单二进制、零运行时依赖，聚合多家供应商，按优先级自动故障转移。",
-  "start_url": "../../",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#06080f",
   "theme_color": "#06080f",
