@@ -258,7 +258,7 @@ impl Usage {
         let to = to.max(from);
         let bucket = bucket.max((to - from) / 4000 + 1).max(60);
         let aligned = from - from % bucket;
-        let n = ((to - aligned + bucket - 1) / bucket) as usize;
+        let n = (to - aligned).div_ceil(bucket) as usize;
         let mut buckets: Vec<BucketStat> = (0..n)
             .map(|i| BucketStat {
                 t: aligned + i as u64 * bucket,

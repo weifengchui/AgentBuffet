@@ -542,7 +542,11 @@ async fn api_json_shapes() {
         st.clone(),
         LB,
         "GET",
-        &format!("/api/usage/stats?from={}&to={}&bucket=3600", base - 10, base + 30),
+        &format!(
+            "/api/usage/stats?from={}&to={}&bucket=3600",
+            base - 10,
+            base + 30
+        ),
         None,
     )
     .await;

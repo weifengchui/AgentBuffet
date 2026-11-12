@@ -124,11 +124,7 @@ impl Target {
     /// 环境注册表里，直接查会丢掉 WSL/Windows 侧的主机地址修正。
     pub fn base_url_for_profile(&self, profile: &str) -> String {
         let addr = scope::gateway_addr_for(&self.agent_id, &self.gateway_addr, &home_dir());
-        format!(
-            "http://{}/{}/v1",
-            addr,
-            self.agent_id_for_profile(profile)
-        )
+        format!("http://{}/{}/v1", addr, self.agent_id_for_profile(profile))
     }
     pub fn model_pointer(&self) -> String {
         format!("{PROVIDER_NAME}/group/{}", self.default_group)
@@ -542,7 +538,11 @@ pub fn detect(home: &Path, target: &Target) -> AgentStatus {
                     missing.join("、")
                 ),
                 None if s.attached => {
-                    format!("已接入全部 {} 个配置档：{}", profiles.len(), locs.join("；"))
+                    format!(
+                        "已接入全部 {} 个配置档：{}",
+                        profiles.len(),
+                        locs.join("；")
+                    )
                 }
                 None => locs.join("；"),
             };
@@ -694,10 +694,8 @@ pub fn apply(home: &Path, target: &Target) -> Result<ApplyResult, String> {
         }
         Adapter::Hermes => {
             let changes = hm_render_all(home, target)?;
-            let dirty: Vec<&(PathBuf, String, String)> = changes
-                .iter()
-                .filter(|(_, old, new)| old != new)
-                .collect();
+            let dirty: Vec<&(PathBuf, String, String)> =
+                changes.iter().filter(|(_, old, new)| old != new).collect();
             if dirty.is_empty() {
                 return Ok(hm_result_files(
                     target,
@@ -943,7 +941,7 @@ pub fn migrate_legacy(path: &std::path::Path, scopes: &[scope::Scope]) -> Vec<(S
                 }
                 continue;
             }
-            if existing.iter().any(|e| *e == new_id) {
+            if existing.contains(&new_id) {
                 drop.push(i); // 已有新编码条目，旧的是重复登记
                 renames.push((id, new_id));
                 changed = true;
@@ -1638,7 +1636,10 @@ fn hm_get(lines: &[&str], key: &str) -> Option<String> {
 fn hm_has_ours(text: &str) -> bool {
     let lines: Vec<&str> = text.lines().collect();
     // 旧版接入写过 `custom:agentbuffet`，两种写法都视为 AgentBuffet 自己接管。
-    matches!(hm_get(&lines, "provider").as_deref(), Some(PROVIDER_NAME) | Some("custom:agentbuffet"))
+    matches!(
+        hm_get(&lines, "provider").as_deref(),
+        Some(PROVIDER_NAME) | Some("custom:agentbuffet")
+    )
 }
 
 /// 非活跃配置档的就地纠正：不重写模型选择，只修两处会出问题的字段——
@@ -1744,9 +1745,11 @@ fn hm_render_at(text: &str, target: &Target, base_url: &str) -> Result<String, S
 /// idempotent：重复调用不会追加多条。
 fn hm_upsert_custom_at(text: &str, target: &Target, base_url: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
-    let start = lines
-        .iter()
-        .position(|l| !l.starts_with(' ') && !l.starts_with('\t') && l.trim_start().starts_with("custom_providers:"));
+    let start = lines.iter().position(|l| {
+        !l.starts_with(' ')
+            && !l.starts_with('\t')
+            && l.trim_start().starts_with("custom_providers:")
+    });
     let Some(start) = start else {
         // 没有该段：追加到文件末尾
         let mut out = text.trim_end().to_string();
@@ -1775,7 +1778,11 @@ fn hm_upsert_custom_at(text: &str, target: &Target, base_url: &str) -> String {
         for (i, l) in lines.iter().enumerate() {
             if i == start {
                 out.push("custom_providers:".to_string());
-                out.extend(hm_custom_item_at("  ", target, base_url).lines().map(str::to_string));
+                out.extend(
+                    hm_custom_item_at("  ", target, base_url)
+                        .lines()
+                        .map(str::to_string),
+                );
             } else {
                 out.push(l.to_string());
             }
@@ -1808,7 +1815,11 @@ fn hm_upsert_custom_at(text: &str, target: &Target, base_url: &str) -> String {
         }
         for (i, l) in lines.iter().enumerate() {
             if i == s0 {
-                out.extend(hm_custom_item_at(&indent, target, base_url).lines().map(str::to_string));
+                out.extend(
+                    hm_custom_item_at(&indent, target, base_url)
+                        .lines()
+                        .map(str::to_string),
+                );
             } else if i > s0 && i < e0 {
                 continue;
             } else {
@@ -1824,7 +1835,8 @@ fn hm_upsert_custom_at(text: &str, target: &Target, base_url: &str) -> String {
             .map(|off| {
                 // 跳过该条目的续行（更深缩进），整条结束处才是插入点
                 let mut i = start + 1 + off;
-                while i + 1 < end && lines[i + 1].starts_with(&indent) && !same_indent(lines[i + 1]) {
+                while i + 1 < end && lines[i + 1].starts_with(&indent) && !same_indent(lines[i + 1])
+                {
                     i += 1;
                 }
                 i
@@ -1833,7 +1845,11 @@ fn hm_upsert_custom_at(text: &str, target: &Target, base_url: &str) -> String {
         for (i, l) in lines.iter().enumerate() {
             out.push(l.to_string());
             if i == at {
-                out.extend(hm_custom_item_at(&indent, target, base_url).lines().map(str::to_string));
+                out.extend(
+                    hm_custom_item_at(&indent, target, base_url)
+                        .lines()
+                        .map(str::to_string),
+                );
             }
         }
     }
@@ -2019,11 +2035,17 @@ mod tests {
         std::fs::write(root.join("config.yaml"), "model:\n  provider: y\n").unwrap();
         apply(&home, &hermes_target("hermes")).unwrap();
         let text = std::fs::read_to_string(&p).unwrap();
-        assert!(text.contains(&format!("provider: {PROVIDER_NAME}")), "{text}");
+        assert!(
+            text.contains(&format!("provider: {PROVIDER_NAME}")),
+            "{text}"
+        );
         assert!(text.contains("- name: agentbuffet"), "{text}");
         let default_text = std::fs::read_to_string(root.join("config.yaml")).unwrap();
         assert!(default_text.contains("provider: y"), "{default_text}");
-        assert!(default_text.contains("- name: agentbuffet"), "{default_text}");
+        assert!(
+            default_text.contains("- name: agentbuffet"),
+            "{default_text}"
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -2056,8 +2078,14 @@ mod tests {
         assert!(std::fs::read_to_string(&active)
             .unwrap()
             .contains(&format!("provider: {PROVIDER_NAME}")));
-        assert!(std::fs::read_to_string(&other).unwrap().contains("provider: z"));
-        assert!(!empty.exists(), "没有配置文件的档不应被新建: {}", empty.display());
+        assert!(std::fs::read_to_string(&other)
+            .unwrap()
+            .contains("provider: z"));
+        assert!(
+            !empty.exists(),
+            "没有配置文件的档不应被新建: {}",
+            empty.display()
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -2165,7 +2193,11 @@ mod tests {
         let before = std::fs::read_to_string(&other).unwrap();
         let r = plan(&home, &hermes_target("hermes")).unwrap();
         assert_eq!(r.files.len(), 3, "{:?}", r.files.iter().map(|f| &f.path));
-        assert_eq!(std::fs::read_to_string(&other).unwrap(), before, "plan 不应落盘");
+        assert_eq!(
+            std::fs::read_to_string(&other).unwrap(),
+            before,
+            "plan 不应落盘"
+        );
         assert!(r.note.contains("dry-run"), "{}", r.note);
         let _ = std::fs::remove_dir_all(&home);
     }
@@ -2312,7 +2344,7 @@ agents:
         let cfg = dir.join("config.yaml");
         std::fs::write(
             &cfg,
-            &format!(
+            format!(
                 r#"{MIG_HEAD}  - {{ id: hermes-wsl-ubuntu-24-04-yxf, default_group: bbb, adapter: hermes, home: \\wsl$\Ubuntu-24.04\home\yxf }}
   - {{ id: claude-code-win-yxf, default_group: bbb, home: {} }}
   - {{ id: codex-wsl-Ghost, default_group: bbb, adapter: codex, home: \\wsl.localhost\Ghost\home\x }}
@@ -2353,7 +2385,7 @@ agents:
         let cfg = dir.join("config.yaml");
         std::fs::write(
             &cfg,
-            &format!(
+            format!(
                 r#"{MIG_HEAD}  - {{ id: hermes@wsl:Ubuntu-24.04, default_group: bbb, adapter: hermes }}
   - {{ id: hermes-wsl-ubuntu-24-04-yxf, default_group: bbb, adapter: hermes, home: \\wsl$\Ubuntu-24.04\home\yxf }}
 "#
@@ -2433,10 +2465,8 @@ agents:
         let addr = lst.local_addr().unwrap();
         std::thread::spawn(move || {
             let mut held = Vec::new();
-            for stream in lst.incoming() {
-                if let Ok(s) = stream {
-                    held.push(s);
-                }
+            for s in lst.incoming().flatten() {
+                held.push(s);
             }
         });
         addr
@@ -2477,7 +2507,10 @@ agents:
             url_hostport(" https://example.org:8443/x ").as_deref(),
             Some("example.org:8443")
         );
-        assert_eq!(url_hostport("http://127.0.0.1:3427").as_deref(), Some("127.0.0.1:3427"));
+        assert_eq!(
+            url_hostport("http://127.0.0.1:3427").as_deref(),
+            Some("127.0.0.1:3427")
+        );
         assert_eq!(url_hostport("http://127.0.0.1/v1"), None, "无端口不解析");
         assert_eq!(url_hostport("garbage"), None);
     }
@@ -2485,13 +2518,19 @@ agents:
     #[test]
     fn url_hostport_edge_cases() {
         // 尾斜杠、无路径、空白包裹（config 里粘贴带空格/换行的地址很常见）
-        assert_eq!(url_hostport("http://127.0.0.1:3427/").as_deref(), Some("127.0.0.1:3427"));
+        assert_eq!(
+            url_hostport("http://127.0.0.1:3427/").as_deref(),
+            Some("127.0.0.1:3427")
+        );
         assert_eq!(
             url_hostport("\thttp://127.0.0.1:3427/x \n").as_deref(),
             Some("127.0.0.1:3427")
         );
         // IPv6 字面量：方括号原样保留，交给 to_socket_addrs 解析
-        assert_eq!(url_hostport("http://[::1]:3425/x").as_deref(), Some("[::1]:3425"));
+        assert_eq!(
+            url_hostport("http://[::1]:3425/x").as_deref(),
+            Some("[::1]:3425")
+        );
         // 主机或端口缺失 → None（否则会去解析 ":3427" 这种残地址）
         assert_eq!(url_hostport("http://:3427/x"), None, "缺主机的残地址");
         assert_eq!(url_hostport("http://127.0.0.1:/x"), None, "缺端口的残地址");
@@ -2552,7 +2591,7 @@ agents:
     fn held_by_other_only_reports_live_foreign_gateway() {
         let addr = fake_gateway();
         let target = hermes_target("hermes"); // base_url → 127.0.0.1:3425
-        // 同址：不探测、不让位
+                                              // 同址：不探测、不让位
         assert_eq!(
             held_by_other(Some("http://127.0.0.1:3425/hermes/v1".into()), &target),
             None
@@ -2626,12 +2665,20 @@ agents:
         let cfg = home.join(".hermes").join("config.yaml");
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
         let url = format!("http://{addr}/hermes/v1");
-        std::fs::write(&cfg, format!("model:\n  provider: agentbuffet\n  base_url: \"{url}\"\n"))
-            .unwrap();
+        std::fs::write(
+            &cfg,
+            format!("model:\n  provider: agentbuffet\n  base_url: \"{url}\"\n"),
+        )
+        .unwrap();
         let s = detect(&home, &hermes_target("hermes"));
         assert!(s.attached, "{:?}", s.note);
         assert!(s.drifted);
-        assert_eq!(s.other_gateway.as_deref(), Some(url.as_str()), "{:?}", s.note);
+        assert_eq!(
+            s.other_gateway.as_deref(),
+            Some(url.as_str()),
+            "{:?}",
+            s.note
+        );
         assert!(s.note.contains("其他网关"), "{:?}", s.note);
         assert!(s.note.contains("巡检不再自动改写"), "{:?}", s.note);
         let _ = std::fs::remove_dir_all(&home);
@@ -2666,7 +2713,11 @@ agents:
         let target = hermes_target("hermes");
         let cfg = home.join(".hermes").join("config.yaml");
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-        std::fs::write(&cfg, "model:\n  provider: x\n  base_url: \"http://127.0.0.1:1/v1\"\n").unwrap();
+        std::fs::write(
+            &cfg,
+            "model:\n  provider: x\n  base_url: \"http://127.0.0.1:1/v1\"\n",
+        )
+        .unwrap();
         apply(&home, &target).unwrap();
         let s = detect(&home, &target);
         assert!(s.attached && !s.drifted, "{:?}", s.note);
@@ -2693,7 +2744,11 @@ agents:
         assert!(s.attached, "{:?}", s.note);
         assert!(s.drifted);
         assert_eq!(s.other_gateway, None);
-        assert!(s.note.contains("漂移") && !s.note.contains("其他网关"), "{:?}", s.note);
+        assert!(
+            s.note.contains("漂移") && !s.note.contains("其他网关"),
+            "{:?}",
+            s.note
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 

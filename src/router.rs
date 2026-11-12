@@ -276,7 +276,8 @@ agents:
     #[test]
     fn resolve_profile_id_inherits_base_agent_group() {
         let snap = crate::config::load_str(MINI_CONFIG, "test.yaml").unwrap();
-        let (group, cands) = resolve(&snap, "hermes@wsl:Ubuntu-24.04~profile:study", "m-a").unwrap();
+        let (group, cands) =
+            resolve(&snap, "hermes@wsl:Ubuntu-24.04~profile:study", "m-a").unwrap();
         assert_eq!(group, "g");
         assert_eq!(cands.len(), 1);
 

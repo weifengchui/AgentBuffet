@@ -15,10 +15,7 @@ static SEQ: AtomicU32 = AtomicU32::new(0);
 fn temp_home(tag: &str) -> PathBuf {
     agentbuffet::onboard::enable_isolation_for_tests();
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let d = std::env::temp_dir().join(format!(
-        "buffet-drift-{tag}-{}-{n}",
-        std::process::id()
-    ));
+    let d = std::env::temp_dir().join(format!("buffet-drift-{tag}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -133,7 +130,11 @@ fn hermes_target(gw_addr: &str) -> Target {
 fn attach_hermes(home: &Path, gw_addr: &str) -> String {
     let cfg = home.join(".hermes").join("config.yaml");
     std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-    std::fs::write(&cfg, "model:\n  provider: x\n  base_url: \"http://127.0.0.1:1/v1\"\n").unwrap();
+    std::fs::write(
+        &cfg,
+        "model:\n  provider: x\n  base_url: \"http://127.0.0.1:1/v1\"\n",
+    )
+    .unwrap();
     let target = hermes_target(gw_addr);
     onboard::apply(home, &target).unwrap();
     std::fs::read_to_string(&cfg).unwrap()
@@ -197,7 +198,10 @@ async fn repair_fixes_drift_to_foreign_llm_service() {
 
     assert_eq!(fixed, vec!["hermes".to_string()], "别家服务不算被占用");
     let after = std::fs::read_to_string(&hermes).unwrap();
-    assert!(after.contains(&format!("http://{ours}/hermes/v1")), "{after}");
+    assert!(
+        after.contains(&format!("http://{ours}/hermes/v1")),
+        "{after}"
+    );
     let _ = std::fs::remove_dir_all(&home);
 }
 
