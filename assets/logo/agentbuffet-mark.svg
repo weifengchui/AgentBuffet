@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet">
+  <title>AgentBuffet · 主 mark（标准版）：长颈鹿＝取餐线，脚边一口餐盖＝自助餐台；颈上白点是各 agent，紫色提钮是优先级档位</title>
+  <defs>
+    <linearGradient id="bf-bus" x1="16" y1="56" x2="44" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8cff"/>
+      <stop offset=".55" stop-color="#5fc6ff"/>
+      <stop offset="1" stop-color="#38e1c6"/>
+    </linearGradient>
+    <linearGradient id="bf-dish" x1="32" y1="56" x2="58" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38e1c6"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <!-- 长颈鹿（与 micro 同一骨架，笔画更细、多出角柄/耳/腹部反光） -->
+  <g transform="translate(-7 3) scale(.8)" fill="none" stroke="url(#bf-bus)" stroke-linecap="round">
+    <path d="M23 44 C21.8 33 24.4 24.6 30 20" stroke-width="8.8"/>
+    <path d="M22 46 H42" stroke-width="9.4"/>
+    <path d="M27.5 50 V55 M38 50 V55" stroke-width="4.3" opacity=".8"/>
+    <path d="M31 10.4 L30.2 5.8 M36.6 10 L37.6 5.8" stroke-width="3.3"/>
+    <path d="M28 12 L24.6 9.8" stroke-width="4.3" opacity=".9"/>
+  </g>
+  <g transform="translate(-7 3) scale(.8)">
+    <ellipse cx="33" cy="15.4" rx="8.25" ry="6.75" transform="rotate(-12 33 15.4)" fill="#0a1220" stroke="#38e1c6" stroke-width="2.9"/>
+    <g fill="#38e1c6">
+      <circle cx="30" cy="4.8" r="2.5"/>
+      <circle cx="38" cy="4.8" r="2.5"/>
+    </g>
+    <circle cx="31.6" cy="13.8" r="1.75" fill="#eafcff"/>
+    <circle cx="38" cy="16.4" r="1.25" fill="#5fc6ff"/>
+    <g fill="#eafcff" opacity=".92">
+      <circle cx="23.2" cy="38.4" r="2.25"/>
+      <circle cx="24" cy="32" r="2.25"/>
+      <circle cx="25.6" cy="25.8" r="2.25"/>
+    </g>
+    <g fill="#dff2ff" opacity=".5">
+      <circle cx="31" cy="46" r="2.5"/>
+      <circle cx="37.5" cy="46" r="2.5"/>
+    </g>
+  </g>
+  <!-- 餐盖：穹顶 + 餐盘 + 提钮 -->
+  <g fill="none" stroke="url(#bf-dish)" stroke-linecap="round">
+    <path d="M36.5 46a9.5 9.5 0 0 1 19 0" stroke-width="4.6"/>
+    <path d="M33 51h26" stroke-width="5.6"/>
+  </g>
+  <path d="M40.6 42.4a6.6 6.6 0 0 1 2.6-2.6" fill="none" stroke="#5fc6ff" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>
+  <circle cx="46" cy="34.6" r="2.2" fill="#a78bfa"/>
+  <circle cx="46" cy="34.6" r=".9" fill="#f4fdff"/>
+</svg>

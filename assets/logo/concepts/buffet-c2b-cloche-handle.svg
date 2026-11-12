@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet 餐盖把手长颈鹿 C2b">
+  <defs>
+    <linearGradient id="c2b-bus" x1="12" y1="58" x2="50" y2="2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8cff"/>
+      <stop offset=".5" stop-color="#38e1c6"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#c2b-bus)" stroke-linecap="round">
+    <!-- 餐盖：顶部留缺口，长颈从缺口里长出＝盖子提手 -->
+    <path d="M15 45a17 17 0 0 1 11-16.1" stroke-width="6"/>
+    <path d="M38 28.9A17 17 0 0 1 49 45" stroke-width="6"/>
+    <!-- 长颈 -->
+    <path d="M32.5 31c-1.4-8 1-13.5 6.2-16.6" stroke-width="6"/>
+    <!-- 餐盘 -->
+    <path d="M9 51h46" stroke-width="6.6"/>
+  </g>
+  <ellipse cx="41.8" cy="11" rx="6.2" ry="4.8" transform="rotate(-14 41.8 11)" fill="#0a1220" stroke="#38e1c6" stroke-width="2.4"/>
+  <g fill="#38e1c6">
+    <circle cx="37.4" cy="4.4" r="2"/>
+    <circle cx="45" cy="4.2" r="2"/>
+  </g>
+  <circle cx="40.4" cy="10" r="1.5" fill="#eafcff"/>
+  <circle cx="32.6" cy="24" r="1.9" fill="#eafcff" opacity=".9"/>
+  <circle cx="22.5" cy="40" r="2.3" fill="#4f8cff"/>
+  <circle cx="42" cy="40" r="2.3" fill="#a78bfa"/>
+</svg>

@@ -27,6 +27,17 @@ use std::time::{Duration, Instant};
 /// 内嵌单文件 UI（零运行时依赖：无框架、无外部资源）。
 const UI_HTML: &str = include_str!("ui.html");
 
+/// 品牌图标：编译期内嵌进二进制，页面用 data URI 引用，省掉一次请求和一个资产目录。
+const FAVICON_SVG: &str = include_str!("../assets/logo/favicon/favicon.svg");
+
+fn favicon_data_uri() -> String {
+    use base64::Engine;
+    format!(
+        "data:image/svg+xml;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(FAVICON_SVG)
+    )
+}
+
 pub fn build_router(state: Arc<proxy::AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -122,7 +133,9 @@ async fn ui_index(ConnectInfo(peer): ConnectInfo<SocketAddr>) -> Response<Body> 
     if let Some(r) = guard(peer) {
         return r;
     }
-    let html = UI_HTML.replace("__BUFFET_VERSION__", env!("CARGO_PKG_VERSION"));
+    let html = UI_HTML
+        .replace("__BUFFET_VERSION__", env!("CARGO_PKG_VERSION"))
+        .replace("__FAV__", &favicon_data_uri());
     let mut r = Response::new(Body::from(html));
     *r.status_mut() = StatusCode::OK;
     r.headers_mut().insert(
@@ -2495,4 +2508,62 @@ fn json_response(status: StatusCode, payload: serde_json::Value) -> Response<Bod
         HeaderValue::from_static("application/json"),
     );
     r
+}
+
+#[cfg(test)]
+mod brand_assets_tests {
+    use super::{favicon_data_uri, UI_HTML};
+
+    #[test]
+    fn favicon_data_uri_round_trips_to_brand_asset() {
+        use base64::Engine;
+        let uri = favicon_data_uri();
+        let b64 = uri
+            .strip_prefix("data:image/svg+xml;base64,")
+            .expect("favicon 应是 svg data URI");
+        let svg = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .expect("data URI 里的 base64 应可解码"),
+        )
+        .expect("favicon 是 UTF-8 SVG");
+        assert!(svg.contains("<svg") && svg.contains("AgentBuffet"));
+        assert!(svg.contains("bfv-clip"), "favicon 应带圆角方底");
+    }
+
+    #[test]
+    fn console_ui_has_giraffe_mark_and_favicon_slot() {
+        assert!(
+            UI_HTML.contains("href=\"__FAV__\""),
+            "控制台应预留 favicon 占位"
+        );
+        assert!(
+            UI_HTML.contains("class=\"mark\""),
+            "侧栏 logo 应是内联 mark"
+        );
+        assert!(UI_HTML.contains("bf-ui-grad"), "侧栏 mark 应引用品牌渐变");
+        assert!(
+            !UI_HTML.contains("<span class=\"dot\"></span>"),
+            "旧的蓝点 logo 应已替换"
+        );
+        let html = UI_HTML
+            .replace("__BUFFET_VERSION__", "0.0.0-test")
+            .replace("__FAV__", &favicon_data_uri());
+        assert!(!html.contains("__FAV__"), "占位符应被全部替换");
+        assert!(!html.contains("__BUFFET_VERSION__"));
+        assert!(html.contains("v0.0.0-test"), "版本号应替换进侧栏徽标");
+    }
+
+    #[test]
+    fn docs_page_wires_giraffe_mark() {
+        let page = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/index.html"))
+            .expect("docs/index.html 应可读");
+        assert_eq!(
+            page.matches("url(#bf-brand-grad)").count(),
+            2,
+            "导航与页脚两处 logo 都该引用共享渐变"
+        );
+        assert!(page.contains("assets/logo/favicon/favicon.svg"));
+        assert!(!page.contains("<span class=\"mark\">B</span>"));
+    }
 }

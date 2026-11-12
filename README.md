@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🍱 AgentBuffet
+<img src="assets/logo/agentbuffet-mark-glow.svg" width="96" alt="AgentBuffet giraffe mark">
+
+# AgentBuffet
 
 **A tiny, local AI model API gateway — one binary, zero runtime dependencies.**
 

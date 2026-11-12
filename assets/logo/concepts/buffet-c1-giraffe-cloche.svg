@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet 长颈鹿与餐盖 C1">
+  <defs>
+    <linearGradient id="c1-bus" x1="16" y1="56" x2="46" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8cff"/>
+      <stop offset=".55" stop-color="#5fc6ff"/>
+      <stop offset="1" stop-color="#38e1c6"/>
+    </linearGradient>
+    <linearGradient id="c1-bus2" x1="34" y1="54" x2="58" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38e1c6"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <!-- 长颈鹿：沿用 AgentLink 微标骨架，整体缩到左半区 -->
+  <g transform="translate(-7 3) scale(.8)" fill="none" stroke="url(#c1-bus)" stroke-linecap="round">
+    <path d="M24 44.5C22.4 33 25.4 24 31.4 19" stroke-width="11.5"/>
+    <path d="M21 46.5H42.5" stroke-width="12"/>
+    <path d="M27 52v5.5M37 52v5.5" stroke-width="5.6" opacity=".9"/>
+  </g>
+  <g transform="translate(-7 3) scale(.8)">
+    <ellipse cx="35" cy="14" rx="8.8" ry="7.2" transform="rotate(-10 35 14)" fill="#0a1220" stroke="#38e1c6" stroke-width="3.9"/>
+    <circle cx="33.4" cy="12.6" r="2.6" fill="#eafcff"/>
+    <g fill="#38e1c6">
+      <circle cx="31.2" cy="3.8" r="3.2"/>
+      <circle cx="40.4" cy="4.2" r="3.2"/>
+    </g>
+    <g fill="#eafcff">
+      <circle cx="23.4" cy="36" r="3"/>
+      <circle cx="25.8" cy="26.8" r="3"/>
+    </g>
+  </g>
+  <!-- 脚边的自助餐盖 -->
+  <g fill="none" stroke="url(#c1-bus2)" stroke-linecap="round">
+    <path d="M38 46.5a8 8 0 0 1 16 0" stroke-width="4.6"/>
+    <path d="M35 50.5h22" stroke-width="5"/>
+  </g>
+  <circle cx="46" cy="36.4" r="2.2" fill="#a78bfa"/>
+</svg>

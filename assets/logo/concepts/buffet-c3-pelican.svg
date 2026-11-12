@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet 鹈鹕取餐 C3">
+  <defs>
+    <linearGradient id="c3-bus" x1="14" y1="58" x2="48" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8cff"/>
+      <stop offset=".55" stop-color="#5fc6ff"/>
+      <stop offset="1" stop-color="#38e1c6"/>
+    </linearGradient>
+    <linearGradient id="c3-pouch" x1="26" y1="16" x2="50" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#38e1c6" stop-opacity=".34"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#c3-bus)" stroke-linecap="round">
+    <!-- 长颈 + 身体 -->
+    <path d="M21 21c-1 9 1 17 5 22" stroke-width="6.2"/>
+    <path d="M24 45c6 6 15 6 21 0" stroke-width="6.2"/>
+    <path d="M30 50v4.5M38 50v4.5" stroke-width="3" opacity=".85"/>
+    <path d="M45 46l5-3.4" stroke-width="3" opacity=".8"/>
+    <!-- 上喙 -->
+    <path d="M27 14.5l22 5.5" stroke-width="3.4"/>
+    <!-- 喉囊：一口兜住多家供应商 -->
+    <path d="M27 19c6 12 17 13 22 1-6 3-14 1-22-1z" fill="url(#c3-pouch)" stroke-width="2.6"/>
+  </g>
+  <ellipse cx="21.5" cy="15" rx="6.2" ry="5" transform="rotate(-6 21.5 15)" fill="#0a1220" stroke="#38e1c6" stroke-width="2.4"/>
+  <circle cx="20.2" cy="14.2" r="1.4" fill="#eafcff"/>
+  <circle cx="17.5" cy="7" r="1.9" fill="#38e1c6"/>
+  <g fill="#eafcff" opacity=".9">
+    <circle cx="20.4" cy="30" r="1.7"/>
+    <circle cx="22.4" cy="37" r="1.7"/>
+  </g>
+  <circle cx="38" cy="23" r="1.9" fill="#a78bfa"/>
+</svg>

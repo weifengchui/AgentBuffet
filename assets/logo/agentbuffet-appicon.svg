@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet app icon">
+  <title>AgentBuffet · 应用图标（圆角方底 + 星点 + 发光长颈鹿与餐盖）</title>
+  <defs>
+    <radialGradient id="bfli-bg" cx=".3" cy=".18" r="1.05">
+      <stop offset="0" stop-color="#13233f"/>
+      <stop offset=".55" stop-color="#0a1224"/>
+      <stop offset="1" stop-color="#04060d"/>
+    </radialGradient>
+    <linearGradient id="bfli-bus" x1="16" y1="56" x2="44" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8cff"/>
+      <stop offset=".55" stop-color="#63d2ff"/>
+      <stop offset="1" stop-color="#38e1c6"/>
+    </linearGradient>
+    <linearGradient id="bfli-dish" x1="32" y1="56" x2="58" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38e1c6"/>
+      <stop offset="1" stop-color="#c4a8ff"/>
+    </linearGradient>
+    <filter id="bfli-glow" x="-70%" y="-70%" width="240%" height="240%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="bfli-clip"><rect width="64" height="64" rx="14.5"/></clipPath>
+  </defs>
+  <g clip-path="url(#bfli-clip)">
+    <rect width="64" height="64" fill="url(#bfli-bg)"/>
+    <g fill="#8b97ad" opacity=".5">
+      <circle cx="8" cy="52" r=".9"/><circle cx="14" cy="58" r=".6"/><circle cx="55" cy="9" r=".9"/>
+      <circle cx="60" cy="20" r=".6"/><circle cx="52" cy="4" r=".5"/><circle cx="4" cy="11" r=".6"/>
+      <circle cx="26" cy="5" r=".5"/><circle cx="44" cy="58" r=".6"/>
+    </g>
+    <circle cx="32" cy="32" r="27" fill="none" stroke="#1b3a6b" stroke-width="1" opacity=".7"/>
+    <g transform="translate(32 32) scale(.78) translate(-32 -32)" filter="url(#bfli-glow)">
+      <g transform="translate(-7 3) scale(.8)" fill="none" stroke="url(#bfli-bus)" stroke-linecap="round">
+        <path d="M23 44 C21.8 33 24.4 24.6 30 20" stroke-width="8.8"/>
+        <path d="M22 46 H42" stroke-width="9.4"/>
+        <path d="M27.5 50 V55 M38 50 V55" stroke-width="4.3" opacity=".8"/>
+        <path d="M31 10.4 L30.2 5.8 M36.6 10 L37.6 5.8" stroke-width="3.3"/>
+        <path d="M28 12 L24.6 9.8" stroke-width="4.3" opacity=".9"/>
+      </g>
+      <g transform="translate(-7 3) scale(.8)">
+        <ellipse cx="33" cy="15.4" rx="8.25" ry="6.75" transform="rotate(-12 33 15.4)" fill="#0a1220" stroke="#38e1c6" stroke-width="2.9"/>
+        <g fill="#38e1c6"><circle cx="30" cy="4.8" r="2.5"/><circle cx="38" cy="4.8" r="2.5"/></g>
+        <circle cx="31.6" cy="13.8" r="1.75" fill="#f4fdff"/>
+        <circle cx="38" cy="16.4" r="1.25" fill="#5fc6ff"/>
+        <g fill="#eafcff"><circle cx="23.2" cy="38.4" r="2.25"/><circle cx="24" cy="32" r="2.25"/><circle cx="25.6" cy="25.8" r="2.25"/></g>
+        <g fill="#dff2ff" opacity=".55"><circle cx="31" cy="46" r="2.5"/><circle cx="37.5" cy="46" r="2.5"/></g>
+      </g>
+      <g fill="none" stroke="url(#bfli-dish)" stroke-linecap="round">
+        <path d="M36.5 46a9.5 9.5 0 0 1 19 0" stroke-width="4.6"/>
+        <path d="M33 51h26" stroke-width="5.6"/>
+      </g>
+      <circle cx="46" cy="34.6" r="2.2" fill="#a78bfa"/>
+      <circle cx="46" cy="34.6" r=".9" fill="#f4fdff"/>
+    </g>
+  </g>
+</svg>

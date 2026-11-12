@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🍱 AgentBuffet
+<img src="assets/logo/agentbuffet-mark-glow.svg" width="96" alt="AgentBuffet 长颈鹿 mark">
+
+# AgentBuffet
 
 **极低功耗的本地 AI 模型 API 网关 —— 单二进制，零运行时依赖。**
 

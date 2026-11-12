@@ -7,6 +7,10 @@
 <meta name="description" content="极低功耗的本地 AI 模型 API 网关。单二进制、零运行时依赖，聚合多家模型供应商，按优先级自动故障转移。典型个人用量下空闲 CPU < 0.5%、常驻内存 < 30MB（实测 ≈0% / ≈8MB）。">
 <!-- 发布方式：仓库 docs/ 目录 + GitHub Pages；下载链接指向 Releases/latest 稳定地址，
      发新版无需改动本页。 -->
+<link rel="icon" href="../assets/logo/favicon/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/logo/favicon/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="../assets/logo/favicon/apple-touch-icon.png">
+<link rel="manifest" href="../assets/logo/site.webmanifest">
 <style>
   :root {
     --bg: #06080f;
@@ -41,10 +45,8 @@
   nav.scrolled { border-bottom-color: var(--line); }
   .nav-in { display: flex; align-items: center; gap: 34px; height: 64px; }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: .3px; }
-  .logo .mark {
-    width: 26px; height: 26px; border-radius: 8px; background: var(--grad);
-    display: grid; place-items: center; font-size: 14px; color: #06121f; font-weight: 900;
-  }
+  .logo .mark { width: 30px; height: 30px; display: block; flex: 0 0 auto; }
+  .logo .mark svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 8px rgba(79, 140, 255, .45)); }
   .nav-links { display: flex; gap: 26px; font-size: 14px; color: var(--dim); }
   .nav-links a:hover { color: var(--txt); }
   .nav-cta {
@@ -247,9 +249,19 @@
 </head>
 <body>
 
+<!-- 品牌主 mark 的共享渐变（页内两处 logo 引用）；正本文件见 assets/logo/ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="bf-brand-grad" x1="16" y1="56" x2="44" y2="6" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#4f8cff"/><stop offset=".55" stop-color="#5fc6ff"/><stop offset="1" stop-color="#38e1c6"/>
+  </linearGradient>
+  <linearGradient id="bf-brand-dish" x1="32" y1="56" x2="58" y2="32" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#38e1c6"/><stop offset="1" stop-color="#a78bfa"/>
+  </linearGradient>
+</defs></svg>
+
 <nav id="nav">
   <div class="wrap nav-in">
-    <a class="logo" href="#top"><span class="mark">B</span>AgentBuffet</a>
+    <a class="logo" href="#top"><span class="mark"><svg viewBox="0 0 64 64" role="img" aria-label="AgentBuffet"><g transform="translate(-7 3) scale(.8)" fill="none" stroke="url(#bf-brand-grad)" stroke-linecap="round"><path d="M24 44.5C22.4 33 25.4 24 31.4 19" stroke-width="11.5"/><path d="M21 46.5H42.5" stroke-width="12"/><path d="M27 52v5.5M37 52v5.5" stroke-width="5.6" opacity=".9"/></g><g transform="translate(-7 3) scale(.8)"><ellipse cx="35" cy="14" rx="8.8" ry="7.2" transform="rotate(-10 35 14)" fill="#0a1220" stroke="#38e1c6" stroke-width="3.9"/><circle cx="33.4" cy="12.6" r="2.6" fill="#eafcff"/><g fill="#38e1c6"><circle cx="31.2" cy="3.8" r="3.2"/><circle cx="40.4" cy="4.2" r="3.2"/></g><g fill="#eafcff"><circle cx="23.4" cy="36" r="3"/><circle cx="25.8" cy="26.8" r="3"/></g></g><g fill="none" stroke="url(#bf-brand-dish)" stroke-linecap="round"><path d="M37 46a9 9 0 0 1 18 0" stroke-width="5.4"/><path d="M34 51h24" stroke-width="6"/></g><circle cx="46" cy="35.4" r="2.4" fill="#a78bfa"/></svg></span>AgentBuffet</a>
     <div class="nav-links">
       <a href="#features">核心能力</a>
       <a href="#console">控制台</a>
@@ -463,7 +475,7 @@
 
 <footer>
   <div class="wrap foot">
-    <a class="logo" href="#top"><span class="mark">B</span>AgentBuffet</a>
+    <a class="logo" href="#top"><span class="mark"><svg viewBox="0 0 64 64" role="img" aria-label="AgentBuffet"><g transform="translate(-7 3) scale(.8)" fill="none" stroke="url(#bf-brand-grad)" stroke-linecap="round"><path d="M24 44.5C22.4 33 25.4 24 31.4 19" stroke-width="11.5"/><path d="M21 46.5H42.5" stroke-width="12"/><path d="M27 52v5.5M37 52v5.5" stroke-width="5.6" opacity=".9"/></g><g transform="translate(-7 3) scale(.8)"><ellipse cx="35" cy="14" rx="8.8" ry="7.2" transform="rotate(-10 35 14)" fill="#0a1220" stroke="#38e1c6" stroke-width="3.9"/><circle cx="33.4" cy="12.6" r="2.6" fill="#eafcff"/><g fill="#38e1c6"><circle cx="31.2" cy="3.8" r="3.2"/><circle cx="40.4" cy="4.2" r="3.2"/></g><g fill="#eafcff"><circle cx="23.4" cy="36" r="3"/><circle cx="25.8" cy="26.8" r="3"/></g></g><g fill="none" stroke="url(#bf-brand-dish)" stroke-linecap="round"><path d="M37 46a9 9 0 0 1 18 0" stroke-width="5.4"/><path d="M34 51h24" stroke-width="6"/></g><circle cx="46" cy="35.4" r="2.4" fill="#a78bfa"/></svg></span>AgentBuffet</a>
     <span class="dim">单二进制的本地 AI 模型自助餐台 · 典型用量空闲 CPU &lt; 0.5% · 内存 &lt; 30MB</span>
     <a class="dim" href="https://github.com/weifengchui/AgentBuffet" target="_blank" rel="noopener" style="margin-left:auto">GitHub ↗</a>
     <span class="dim">© 2026 AgentBuffet</span>
