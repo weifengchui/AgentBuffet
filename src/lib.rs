@@ -2532,7 +2532,7 @@ mod brand_assets_tests {
     }
 
     #[test]
-    fn console_ui_has_giraffe_mark_and_favicon_slot() {
+    fn console_ui_has_alpaca_mark_and_favicon_slot() {
         assert!(
             UI_HTML.contains("href=\"__FAV__\""),
             "控制台应预留 favicon 占位"
@@ -2542,6 +2542,14 @@ mod brand_assets_tests {
             "侧栏 logo 应是内联 mark"
         );
         assert!(UI_HTML.contains("bf-ui-grad"), "侧栏 mark 应引用品牌渐变");
+        assert!(
+            UI_HTML.contains("aria-label=\"AgentBuffet\"><defs>"),
+            "侧栏 mark 的 defs 必须写在 <svg> 内，否则 url(#bf-ui-grad) 解析不到，笔画整条消失"
+        );
+        assert!(
+            UI_HTML.contains("stroke=\"url(#bf-ui-grad)\""),
+            "侧栏 mark 的笔画应引用品牌渐变"
+        );
         assert!(
             !UI_HTML.contains("<span class=\"dot\"></span>"),
             "旧的蓝点 logo 应已替换"
@@ -2555,7 +2563,7 @@ mod brand_assets_tests {
     }
 
     #[test]
-    fn docs_page_wires_giraffe_mark() {
+    fn docs_page_wires_alpaca_mark() {
         let page = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/index.html"))
             .expect("docs/index.html 应可读");
         assert_eq!(

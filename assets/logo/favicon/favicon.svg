@@ -1,40 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet">
-  <title>AgentBuffet · favicon（深空方底 + 长颈鹿与餐盖微标）</title>
+  <title>AgentBuffet · favicon（深蓝底方磁贴 + 羊驼微标）</title>
   <defs>
     <linearGradient id="bfv-bus" x1="16" y1="56" x2="44" y2="6" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#4f8cff"/>
-      <stop offset=".55" stop-color="#5fc6ff"/>
-      <stop offset="1" stop-color="#38e1c6"/>
+      <stop offset="0" stop-color="#5b9bff"/><stop offset=".5" stop-color="#7cd8ff"/><stop offset="1" stop-color="#5df0d6"/>
     </linearGradient>
-    <linearGradient id="bfv-dish" x1="32" y1="56" x2="58" y2="32" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#38e1c6"/>
-      <stop offset="1" stop-color="#a78bfa"/>
-    </linearGradient>
-    <radialGradient id="bfv-bg" cx=".3" cy=".2" r="1.1">
-      <stop offset="0" stop-color="#13233f"/>
-      <stop offset="1" stop-color="#05070f"/>
+    <radialGradient id="bfv-bg" cx=".3" cy=".18" r="1.05">
+      <stop offset="0" stop-color="#1b3055"/><stop offset=".55" stop-color="#04060d"/><stop offset="1" stop-color="#04060d"/>
     </radialGradient>
     <clipPath id="bfv-clip"><rect width="64" height="64" rx="14.5"/></clipPath>
   </defs>
   <g clip-path="url(#bfv-clip)">
     <rect width="64" height="64" fill="url(#bfv-bg)"/>
-    <g transform="translate(1 6) scale(.9)">
-      <g transform="translate(-7 3) scale(.8)" fill="none" stroke="url(#bfv-bus)" stroke-linecap="round">
-        <path d="M24 44.5C22.4 33 25.4 24 31.4 19" stroke-width="11.5"/>
-        <path d="M21 46.5H42.5" stroke-width="12"/>
-        <path d="M27 52v5.5M37 52v5.5" stroke-width="5.6" opacity=".9"/>
-      </g>
-      <g transform="translate(-7 3) scale(.8)">
-        <ellipse cx="35" cy="14" rx="8.8" ry="7.2" transform="rotate(-10 35 14)" fill="#0a1220" stroke="#38e1c6" stroke-width="3.9"/>
-        <circle cx="33.4" cy="12.6" r="2.6" fill="#eafcff"/>
-        <g fill="#38e1c6"><circle cx="31.2" cy="3.8" r="3.2"/><circle cx="40.4" cy="4.2" r="3.2"/></g>
-        <g fill="#eafcff"><circle cx="23.4" cy="36" r="3"/><circle cx="25.8" cy="26.8" r="3"/></g>
-      </g>
-      <g fill="none" stroke="url(#bfv-dish)" stroke-linecap="round">
-        <path d="M37 46a9 9 0 0 1 18 0" stroke-width="5.4"/>
-        <path d="M34 51h24" stroke-width="6"/>
-      </g>
-      <circle cx="46" cy="35.4" r="2.4" fill="#a78bfa"/>
+    <g transform="translate(32 32) scale(.86) translate(-35 -32)">
+        <g fill="none" stroke="url(#bfv-bus)" stroke-linecap="round">
+    <path d="M24 43.5H41" stroke-width="14"/>
+    <path d="M28 49.5v6M37 49.5v6" stroke-width="6"/>
+    <path d="M37.8 41C38.6 32.5 38.4 26.5 40.6 21.6" stroke-width="11.6"/>
+    <path d="M35.4 13.4L31.6 8.6M47.8 13L51.4 8.4" stroke-width="5.6"/>
+  </g>
+  <ellipse cx="41.5" cy="18.2" rx="7.0" ry="6.4" transform="rotate(-10 41.5 18.2)" fill="#081019" stroke="#38e1c6" stroke-width="3.2"/>
+  <circle cx="44.6" cy="17.0" r="2.4" fill="#f4fdff"/>
+  
+  <g fill="#eafcff"><circle cx="38.2" cy="11.2" r="3.6"/><circle cx="45.0" cy="11.0" r="3.4"/></g>
+  
+  <g fill="#eafcff" opacity=".92"><circle cx="19.8" cy="40.6" r="4.4"/></g>
     </g>
   </g>
 </svg>

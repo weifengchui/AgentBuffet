@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo/agentbuffet-mark-glow.svg" width="96" alt="AgentBuffet 长颈鹿 mark">
+<img src="assets/logo/agentbuffet-mark-glow.svg" width="96" alt="AgentBuffet 羊驼 mark">
 
 # AgentBuffet
 

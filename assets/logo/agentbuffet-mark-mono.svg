@@ -1,32 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentBuffet">
-  <title>AgentBuffet · 主 mark（单色版）：印刷/水印用，取餐线上的 agent 用镂空表达</title>
+  <title>AgentBuffet · 主 mark（单色版）：印刷/水印用，随 currentColor 走的实心剪影</title>
   <defs>
     <mask id="bfmo-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
-      <rect width="64" height="64" fill="#fff"/>
-      <circle cx="13" cy="33.1" r="2.7" fill="#000"/>
-      <circle cx="13.6" cy="28" r="2.7" fill="#000"/>
-      <circle cx="14.9" cy="23" r="2.7" fill="#000"/>
+      <rect width="64" height="64" fill="#000"/>
+      <g fill="none" stroke="#fff" stroke-linecap="round"><path d="M24 43.5H41" stroke-width="12"/><path d="M28 49.5v6M37 49.5v6" stroke-width="4.8"/><path d="M37.8 41C38.6 32.5 38.4 26.5 40.6 21.6" stroke-width="10"/><path d="M35.4 13.4L31.6 8.6M47.8 13L51.4 8.4" stroke-width="4.6"/></g>
+      <g fill="#fff"><circle cx="37.6" cy="11.6" r="3.0"/><circle cx="41.6" cy="9.6" r="3.6"/><circle cx="45.6" cy="11.4" r="2.9"/><circle cx="21.6" cy="38.6" r="3.2"/><circle cx="18.8" cy="42" r="2.6"/><ellipse cx="41.5" cy="18.2" rx="6.6" ry="6" transform="rotate(-10 41.5 18.2)"/></g>
+      <circle cx="44.2" cy="17.2" r="1.9" fill="#000"/>
     </mask>
   </defs>
-  <g fill="none" stroke="currentColor" stroke-linecap="round">
-    <path d="M12.8 37.6 C11.8 28.8 13.9 22.1 18.4 18.4" stroke-width="7" mask="url(#bfmo-cut)"/>
-    <path d="M12 39.2 H28" stroke-width="7.5"/>
-    <path d="M16.4 42.4 V46.4 M24.8 42.4 V46.4" stroke-width="3.4"/>
-    <path d="M19.2 10.7 L18.6 7 M23.7 10.4 L24.5 7" stroke-width="2.6"/>
-    <path d="M16.8 12 L14.1 10.2" stroke-width="3.4"/>
-    <path d="M36.5 46a9.5 9.5 0 0 1 19 0" stroke-width="4.2"/>
-    <path d="M33 51h26" stroke-width="4.6"/>
-  </g>
-  <ellipse cx="20.8" cy="14.7" rx="6.6" ry="5.4" transform="rotate(-12 20.8 14.7)" fill="none" stroke="currentColor" stroke-width="2.3"/>
-  <g fill="currentColor">
-    <circle cx="18.4" cy="6.2" r="2"/>
-    <circle cx="24.8" cy="6.2" r="2"/>
-    <circle cx="19.7" cy="13.4" r="1.5"/>
-    <circle cx="46" cy="34.6" r="2.1"/>
-    <circle cx="16.4" cy="47.5" r="1.9"/>
-    <circle cx="24.8" cy="47.5" r="1.9"/>
-    <circle cx="13" cy="33.1" r="1.1"/>
-    <circle cx="13.6" cy="28" r="1.1"/>
-    <circle cx="14.9" cy="23" r="1.1"/>
-  </g>
+  <rect width="64" height="64" fill="currentColor" mask="url(#bfmo-cut)"/>
 </svg>

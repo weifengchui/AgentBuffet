@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo/agentbuffet-mark-glow.svg" width="96" alt="AgentBuffet giraffe mark">
+<img src="assets/logo/agentbuffet-mark-glow.svg" width="96" alt="AgentBuffet alpaca mark">
 
 # AgentBuffet
 
